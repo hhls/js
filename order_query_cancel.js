@@ -31,12 +31,12 @@ export const options = {
       startRate: 10,
       timeUnit: '1s',
       preAllocatedVUs: 50,
-      maxVUs: 100,
+      maxVUs: 1000,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
-        { duration: '200s', target: 3000 },
-        { duration: '200s', target: 6000 },
-        { duration: '100s', target: 6000 },
+        { duration: '200s', target: 200 },
+        { duration: '200s', target: 400 },
+        { duration: '100s', target: 400 },
         { duration: '5s', target: 0 },
       ],
     },
