@@ -23,9 +23,9 @@ export const options = {
             preAllocatedVUs: 50,                 // 预分配虚拟用户数：50个
             maxVUs: 500,                         // 最大虚拟用户数：100个
             gracefulStop: '10s',                 // 自定义优雅停止时间为 10 秒
-            stages: [{duration: '30s', target: 500},    // 阶段1：5秒内爬升到20 TPS
-                 { duration: '60s', target: 1000 },  // 阶段2：60秒内爬升到50 TPS
-                 { duration: '30s', target: 1000 },  // 阶段3：保持50 TPS持续30秒
+            stages: [{duration: '30s', target: 100},    // 阶段1：5秒内爬升到20 TPS
+                 { duration: '60s', target: 300 },  // 阶段2：60秒内爬升到50 TPS
+                 { duration: '30s', target: 300 },  // 阶段3：保持50 TPS持续30秒
                 {duration: '10s', target: 0},     // 阶段4：5秒内降到0 TPS
             ],
   thresholds: {
