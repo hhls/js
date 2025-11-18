@@ -35,8 +35,8 @@ export const options = {
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
         { duration: '30s', target: 100 },
-        { duration: '60s', target: 1000 },
-        { duration: '30s', target: 1000 },
+        { duration: '60s', target: 5000 },
+        { duration: '30s', target: 5000 },
         { duration: '10s', target: 0 },
       ],
     },
