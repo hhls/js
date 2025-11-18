@@ -34,7 +34,7 @@ export const options = {
       maxVUs: 100,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
-        { duration: '100s', target: 3000 },
+        { duration: '200s', target: 3000 },
         { duration: '200s', target: 6000 },
         { duration: '100s', target: 6000 },
         { duration: '5s', target: 0 },
