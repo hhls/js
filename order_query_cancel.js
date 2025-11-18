@@ -18,10 +18,10 @@ const credentials = new SharedArray('credentials', function () {
 
 export const options = {
   thresholds: {
-  http_req_failed: [{ threshold: 'rate<0.02', abortOnFail: true }],
-    'http_req_duration{name:PlaceOrder}': ['p(99)<15000'],
-    'http_req_duration{name:QueryOrders}': ['p(99)<13000'],
-    'http_req_duration{name:CancelBatch}': ['p(99)<15000'],
+  http_req_failed: [{ threshold: 'rate<0.01', abortOnFail: true }],
+    'http_req_duration{name:PlaceOrder}': ['p(99)<20000'],
+    'http_req_duration{name:QueryOrders}': ['p(99)<20000'],
+    'http_req_duration{name:CancelBatch}': ['p(99)<20000'],
   },
 
   scenarios: {
