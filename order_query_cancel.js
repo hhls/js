@@ -49,7 +49,7 @@ const config = {
 };
 
 //  一致性hash找出同一个节点的币对进行压测
-const INSTRUMENTS = ['BNB','BTC','ETH']
+const INSTRUMENTS = ['ADA', 'TREE', 'XRP']
 
 const commonHeaders = {
   'Connection': 'close',
