@@ -30,7 +30,7 @@ export const options = {
       startRate: 10,
       timeUnit: '1s',
       preAllocatedVUs: 50,
-      maxVUs: 1500,
+      maxVUs: 9999,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
         { duration: '120s', target: 70 },
@@ -50,7 +50,7 @@ const config = {
 };
 
 //  一致性hash找出同一个节点的币对进行压测
-const INSTRUMENTS = ['ADA', 'TREE', 'XRP']
+const INSTRUMENTS = ['ETH','BNB']
 
 const commonHeaders = {
   'Connection': 'close',
