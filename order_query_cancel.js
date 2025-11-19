@@ -164,12 +164,12 @@ function placeOrders(user,INSTRUMENT) {
 //  console.info(`下单响应体: ${response.body}`);
   orderSuccessRate.add(success);
 
-  if (!success) {
-    console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
-    errorRate.add(1);
-  } else {
-    console.log(`[${user.account}] 下单成功`);
-  }
+//  if (!success) {
+//    //console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
+//    errorRate.add(1);
+//  } else {
+//    console.log(`[${user.account}] 下单成功`);
+//  }
 
   return success;
 }
@@ -181,7 +181,7 @@ function queryCurrentOrders(user,INSTRUMENT) {
   const apiPath = '/v1/perpum-market/orders/open';
   const instrument = INSTRUMENT;
   const positionType = 'plan';
-  const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&pageSize=10`;
+  const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&pageSize=100`;
   const url = `${config.baseUrl}${apiPath}${queryString}`;
   const headers = generateSignedHeadersForGet('GET', apiPath, queryString, user.apikey, user.secretkey, user.uid);
 
@@ -208,7 +208,7 @@ function queryCurrentOrders(user,INSTRUMENT) {
 //  console.info(`查询订单响应体: ${response.body}`);
 
   if (!success) {
-    console.error(`[${user.account}] 查询失败: ${response.status} - ${response.body}`);
+    //console.error(`[${user.account}] 查询失败: ${response.status} - ${response.body}`);
     errorRate.add(1);
     return [];
   }
@@ -267,7 +267,7 @@ function cancelBatchOrders(user, orderIds,INSTRUMENT) {
   cancelSuccessRate.add(success);
 
   if (!success) {
-    console.error(`[${user.account}] 撤单失败: ${response.status} - ${response.body}`);
+    //console.error(`[${user.account}] 撤单失败: ${response.status} - ${response.body}`);
     errorRate.add(1);
     return false;
   }
