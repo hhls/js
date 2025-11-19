@@ -294,7 +294,7 @@ export default function () {
   // 查询订单
   const orderIds = queryCurrentOrders(user,INSTRUMENT);
 
-    console.info(`orderIds=${orderIds}`)
+//    console.info(`orderIds=${orderIds}`)
   // 批量撤单
   if (orderIds.length > 0) {
     cancelBatchOrders(user, orderIds,INSTRUMENT);
