@@ -216,7 +216,7 @@ function queryCurrentOrders(user,INSTRUMENT) {
   try {
     const parsed = JSON.parse(response.body);
     const orderIds = parsed.data && parsed.data.rows ?
-                     parsed.data.rows.map(order => order.orderId) : [];
+                     parsed.data.rows.map(order => order.id) : [];
     console.log(`[${user.account}] 查询到 ${orderIds.length} 个挂单`);
     return orderIds;
   } catch (e) {
@@ -294,6 +294,7 @@ export default function () {
   // 查询订单
   const orderIds = queryCurrentOrders(user,INSTRUMENT);
 
+    console.info(`orderIds=${orderIds}`)
   // 批量撤单
   if (orderIds.length > 0) {
     cancelBatchOrders(user, orderIds,INSTRUMENT);
