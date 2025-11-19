@@ -30,7 +30,7 @@ export const options = {
       startRate: 10,
       timeUnit: '1s',
       preAllocatedVUs: 50,
-      maxVUs: 500,
+      maxVUs: 1500,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
         { duration: '180s', target: 70 },
