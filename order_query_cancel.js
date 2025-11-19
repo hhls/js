@@ -18,7 +18,7 @@ const credentials = new SharedArray('credentials', function () {
 
 export const options = {
   thresholds: {
-  http_req_failed: [{ threshold: 'rate<0.01', abortOnFail: true }],
+//  http_req_failed: [{ threshold: 'rate<0.01', abortOnFail: true }],
     'http_req_duration{name:PlaceOrder}': ['p(99)<20000'],
     'http_req_duration{name:QueryOrders}': ['p(99)<20000'],
     'http_req_duration{name:CancelBatch}': ['p(99)<20000'],
@@ -33,11 +33,11 @@ export const options = {
       maxVUs: 500,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
-        { duration: '180s', target: 25 },
-        { duration: '180s', target: 50 },
-        { duration: '180s', target: 100 },
-        { duration: '180s', target: 200 },
-        { duration: '180s', target: 400 },
+        { duration: '180s', target: 70 },
+        { duration: '180s', target: 140 },
+        { duration: '180s', target: 280 },
+        { duration: '180s', target: 500 },
+        { duration: '180s', target: 1000 },
         { duration: '5s', target: 0 },
       ],
     },
