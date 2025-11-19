@@ -279,8 +279,8 @@ function cancelBatchOrders(user, orderIds,INSTRUMENT) {
 export default function () {
   // 获取当前迭代对应的用户
   const index = exec.scenario.iterationInTest;
-//  const userIndex = index %credentials.length;   //最多多少个压测用户参与压测
-  const userIndex = index % Math.min(30, credentials.length);   //最多多少个压测用户参与压测
+  const userIndex = index %credentials.length;   //最多多少个压测用户参与压测
+//  const userIndex = index % Math.min(30, credentials.length);   //最多多少个压测用户参与压测
   const INSTRUMENT = INSTRUMENTS[index % INSTRUMENTS.length];
   const user = credentials[userIndex];
 
