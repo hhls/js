@@ -181,7 +181,7 @@ function queryCurrentOrders(user,INSTRUMENT) {
   const apiPath = '/v1/perpum-market/orders/open';
   const instrument = INSTRUMENT;
   const positionType = 'plan';
-  const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&rows=100&pageSize=100&sort=id&order=desc`;
+  const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&pageSize=10`;
   const url = `${config.baseUrl}${apiPath}${queryString}`;
   const headers = generateSignedHeadersForGet('GET', apiPath, queryString, user.apikey, user.secretkey, user.uid);
 
