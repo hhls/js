@@ -30,12 +30,14 @@ export const options = {
       startRate: 10,
       timeUnit: '1s',
       preAllocatedVUs: 50,
-      maxVUs: 1000,
+      maxVUs: 500,
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
-        { duration: '200s', target: 25 },
-        { duration: '200s', target: 50 },
-        { duration: '100s', target: 100 },
+        { duration: '180s', target: 25 },
+        { duration: '180s', target: 50 },
+        { duration: '180s', target: 100 },
+        { duration: '180s', target: 200 },
+        { duration: '180s', target: 400 },
         { duration: '5s', target: 0 },
       ],
     },
@@ -179,7 +181,7 @@ function queryCurrentOrders(user,INSTRUMENT) {
   const apiPath = '/v1/perpum-market/orders/open';
   const instrument = INSTRUMENT;
   const positionType = 'plan';
-  const queryString = `?instrument=${instrument}&positionType=${positionType}&pageSize=100`;
+  const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&rows=100&pageSize=100&sort=id&order=desc`;
   const url = `${config.baseUrl}${apiPath}${queryString}`;
   const headers = generateSignedHeadersForGet('GET', apiPath, queryString, user.apikey, user.secretkey, user.uid);
 
