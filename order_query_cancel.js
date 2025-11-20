@@ -217,15 +217,15 @@ function queryCurrentOrders(user,INSTRUMENT) {
                      parsed.data.rows.map(order => order.id) : [];
     console.log(`[${user.account}] 查询到 ${orderIds.length} 个挂单`);
 
-    // 1. 创建一个包含唯一 ID 的 Set
-    const uniqueOrderIds = new Set(orderIds);
-
-    // 2. 比较 Set 的大小和原始数组的长度
-    if (uniqueOrderIds.size !== orderIds.length) {
-        console.error(`[${user.account}] 发现重复的订单 ID！`);
-    } else {
-        console.log(`[${user.account}] 所有订单 ID 都是唯一的。`);
-    }
+//    // 1. 创建一个包含唯一 ID 的 Set
+//    const uniqueOrderIds = new Set(orderIds);
+//
+//    // 2. 比较 Set 的大小和原始数组的长度
+//    if (uniqueOrderIds.size !== orderIds.length) {
+//        console.error(`[${user.account}] 发现重复的订单 ID！`);
+//    } else {
+//        console.log(`[${user.account}] 所有订单 ID 都是唯一的。`);
+//    }
 
     return orderIds;
   } catch (e) {
