@@ -4,7 +4,7 @@ import time
 import requests
 
 URL = "https://futuresapi.coinw.market/v1/markets/quotes/swap/BTC/candles"
-PARAMS = {"granularity": "1", "interval": "1", "type": 0,  # 随便挑一个1分钟的
+PARAMS = {"granularity": "1", "interval": "1", "type": 0,
           "chartIndex": 0, "code": "BTC", "dataType": "klinedata",
           "isFirst": "true", "klineType": 1, "quote": "usdt"}
 
@@ -24,4 +24,4 @@ while True:
     except Exception as e:
         print(f"第 {i:4d} 次 请求出错: {e}")
 
-    time.sleep(0.5)  # 改这里控制频率，建议别太快免得被封
+    time.sleep(0.5)
