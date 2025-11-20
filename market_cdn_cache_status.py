@@ -56,7 +56,6 @@ while True:
     cache_control = r.headers.get("Cache-Control", "")
     x_cache = r.headers.get("x-cache-status", "无")
 
-    # 解析关键指标
     cdn_status = edge = origin = "未知"
     for part in timing.split(","):
         part = part.strip()
@@ -67,7 +66,7 @@ while True:
         if "origin; dur=" in part:
             origin = part.split("dur=")[1]
 
-    print(f"第{i:3d}次 | 真实状态: {cdn_status:6} | "
+    print(f"第{i:3d}次 | CDN状态: {cdn_status:6} | "
           f"CDN节点: {edge:>4}ms | 后端: {origin:>6} | "
           f"Cache-Control: {cache_control}")
 
