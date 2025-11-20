@@ -48,7 +48,7 @@ const config = {
 };
 
 //  一致性hash找出同一个节点的币对进行压测
-const INSTRUMENTS = ['ETH','BNB']
+const INSTRUMENTS = ['BNB']
 
 const commonHeaders = {
   'Connection': 'close',
