@@ -20,7 +20,8 @@ while True:
     try:
         r = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=10)
         cache_status = r.headers.get("x-cache-status", "无此header")
-        print(f"第 {i:4d} 次 | x-cash-status: {cache_status} | 状态码: {r.status_code}")
+        cache_control = r.headers.get("Cache-Control", "无此header")
+        print(f"第 {i:4d} 次 |cache_control: {cache_control} x-cash-status: {cache_status} | 状态码: {r.status_code}")
     except Exception as e:
         print(f"第 {i:4d} 次 请求出错: {e}")
 
