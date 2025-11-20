@@ -34,10 +34,8 @@ export const options = {
       gracefulStop: '10s',              // 优雅停止时间
       stages: [
         { duration: '120s', target: 30 },
-        { duration: '120s', target: 60 },
-        { duration: '120s', target: 60 },
-        { duration: '120s', target: 60 },
-        { duration: '120s', target: 60 },
+        { duration: '120s', target: 50 },
+        { duration: '300s', target: 50 },
         { duration: '5s', target: 0 },
       ],
     },
@@ -294,7 +292,7 @@ export default function () {
   // 查询订单
   const orderIds = queryCurrentOrders(user,INSTRUMENT);
 
-//    console.info(`orderIds=${orderIds}`)
+    console.info(`orderIds=${orderIds}`)
   // 批量撤单
   if (orderIds.length > 0) {
     cancelBatchOrders(user, orderIds,INSTRUMENT);
