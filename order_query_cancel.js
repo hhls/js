@@ -150,12 +150,12 @@ function placeOrders(user, INSTRUMENT) {
     //  console.info(`下单响应体: ${response.body}`);
     orderSuccessRate.add(success);
 
-    //  if (!success) {
-    //    //console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
-    //    errorRate.add(1);
-    //  } else {
-    //    console.log(`[${user.account}] 下单成功`);
-    //  }
+    if (!success) {
+        console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
+        errorRate.add(1);
+    } else {
+        console.log(`[${user.account}] 下单成功`);
+    }
 
     return success;
 }
