@@ -32,10 +32,8 @@ export const options = {
             timeUnit: '1s',
             preAllocatedVUs: 50,
             maxVUs: 100,
-            gracefulStop: '10s',              // 优雅停止时间
-            stages: [{duration: '120s', target: 30}, {duration: '120s', target: 50}, {
-                duration: '300s', target: 50
-            }, {duration: '5s', target: 0},],
+            gracefulStop: '10s',
+            stages: [{duration: '120s', target: 10}, {duration: '5s', target: 0},],
         },
     },
 };
@@ -150,12 +148,12 @@ function placeOrders(user, INSTRUMENT) {
     //  console.info(`下单响应体: ${response.body}`);
     orderSuccessRate.add(success);
 
-    if (!success) {
-        console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
-        errorRate.add(1);
-    } else {
-        console.log(`[${user.account}] 下单成功`);
-    }
+    //  if (!success) {
+    //    //console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
+    //    errorRate.add(1);
+    //  } else {
+    //    console.log(`[${user.account}] 下单成功`);
+    //  }
 
     return success;
 }
@@ -190,6 +188,9 @@ function queryCurrentOrders(user, INSTRUMENT) {
 
     querySuccessRate.add(success);
     //  console.info(`查询订单响应体: ${response.body}`);
+
+    // 把这行删掉或注释
+    // console.info(`查询订单响应体: ${response.body}`);
 
     if (!success) {
         //console.error(`[${user.account}] 查询失败: ${response.status} - ${response.body}`);
@@ -237,6 +238,10 @@ function cancelBatchOrders(user, orderIds, INSTRUMENT) {
     const payloadStr = JSON.stringify(payload);
     const headers = generateSignedHeaders('DELETE', apiPath, payload, user.apikey, user.secretkey, user.uid);
     headers['Content-Length'] = payloadStr.length.toString();
+    // 打印完整的请求 payload (使用格式化的 JSON 更清晰)
+    //  console.log('\n========== 撤单请求 Payload ==========');
+    //  console.log(JSON.stringify(payload, null, 2));
+    //  console.log('======================================\n');
 
     const response = http.del(url, payloadStr, {
         headers, tags: {name: 'CancelBatch', account: user.account}
@@ -269,22 +274,21 @@ export default function () {
     // 获取当前迭代对应的用户
     const index = exec.scenario.iterationInTest;
     const userIndex = index % credentials.length;   //最多多少个压测用户参与压测
-    //  const userIndex = index % Math.min(30, credentials.length);   //最多多少个压测用户参与压测
+    // const userIndex = index % Math.min(1, credentials.length);   //最多多少个压测用户参与压测
     const INSTRUMENT = INSTRUMENTS[index % INSTRUMENTS.length];
     const user = credentials[userIndex];
 
     // 批量下单
-    const placeOrderSuccess = placeOrders(user, INSTRUMENT);
-    if (!placeOrderSuccess) {
-        console.error(`[${user.account}] 下单失败，跳过后续步骤`);
-        return;
-    }
+    //  const placeOrderSuccess = placeOrders(user,INSTRUMENT);
+    //  if (!placeOrderSuccess) {
+    //    console.error(`[${user.account}] 下单失败，跳过后续步骤`);
+    //    return;
+    //  }
 
     // 查询订单
     const orderIds = queryCurrentOrders(user, INSTRUMENT);
 
     console.info(`orderIds=${orderIds}`)
-
     // 批量撤单
     if (orderIds.length > 0) {
         cancelBatchOrders(user, orderIds, INSTRUMENT);
