@@ -64,7 +64,7 @@ export const options = {
 };
 
 // 一致性hash找出同一个节点的币对进行压测
-const INSTRUMENTS = ['BNB']
+const INSTRUMENTS = ['ADA']
 
 const commonHeaders = {
     'Connection': 'close',
