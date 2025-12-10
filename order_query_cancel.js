@@ -17,6 +17,29 @@ const credentials = new SharedArray('credentials', function () {
     return parsedData.data;
 });
 
+const BASE_URL = __ENV.BASE_URL || 'https://api.cwfutures.top'
+const TARGET = __ENV.TARGET || 50
+const ENABLE_LOG = __ENV.ENABLE_LOG === 'true' || __ENV.ENABLE_LOG === '1';
+
+function log(...args) {
+    if (ENABLE_LOG) {
+        console.log(...args);
+    }
+}
+
+function logInfo(...args) {
+    if (ENABLE_LOG) {
+        console.info(...args);
+    }
+}
+
+function logError(...args) {
+    // 错误日志始终打印，如果需要也可控制则改为 if (ENABLE_LOG)
+    console.error(...args);
+}
+
+// =====================================
+
 export const options = {
     thresholds: {
         //  http_req_failed: [{ threshold: 'rate<0.01', abortOnFail: true }],
@@ -32,20 +55,15 @@ export const options = {
             timeUnit: '1s',
             preAllocatedVUs: 50,
             maxVUs: 100,
-            gracefulStop: '10s',              // 优雅停止时间
-            stages: [{duration: '120s', target: 30}, {duration: '120s', target: 50}, {
-                duration: '300s', target: 50
+            gracefulStop: '10s',
+            stages: [{duration: '120s', target: TARGET / 2}, {duration: '120s', target: TARGET}, {
+                duration: '300s', target: TARGET
             }, {duration: '5s', target: 0},],
         },
     },
 };
 
-
-const config = {
-    baseUrl: __ENV.BASE_URL || 'https://api.cwfutures.top',
-};
-
-//  一致性hash找出同一个节点的币对进行压测
+// 一致性hash找出同一个节点的币对进行压测
 const INSTRUMENTS = ['BNB']
 
 const commonHeaders = {
@@ -61,7 +79,7 @@ function generateHmacSHA256(data, secretKey) {
     try {
         return hmac('sha256', secretKey, data, 'base64');
     } catch (e) {
-        console.error(`签名生成失败: ${e.message}`);
+        logError(`签名生成失败: ${e.message}`);
         throw e;
     }
 }
@@ -124,13 +142,13 @@ function generateOrderParams(userId, INSTRUMENT) {
  */
 function placeOrders(user, INSTRUMENT) {
     const apiPath = '/v1/perpum-market/batchOrders';
-    const url = `${config.baseUrl}${apiPath}`;
+    const url = `${BASE_URL}${apiPath}`;
     const orderParams = generateOrderParams(user.userid, INSTRUMENT);
     const headers = generateSignedHeaders('POST', apiPath, orderParams, user.apikey, user.secretkey, user.uid);
     const payload = JSON.stringify(orderParams);
     headers['Content-Length'] = payload.length.toString();
 
-    console.log(`[${user.account}] 开始下单，数量: ${orderParams.length}`);
+    log(`[${user.account}] 开始下单，数量: ${orderParams.length}`);
 
     const response = http.post(url, payload, {
         headers: headers, tags: {name: 'PlaceOrder', account: user.account},
@@ -147,14 +165,14 @@ function placeOrders(user, INSTRUMENT) {
         },
     });
 
-    //  console.info(`下单响应体: ${response.body}`);
+    logInfo(`下单响应体: ${response.body}`);
     orderSuccessRate.add(success);
 
     if (!success) {
-        console.error(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
+        logError(`[${user.account}] 下单失败: ${response.status} - ${response.body}`);
         errorRate.add(1);
     } else {
-        console.log(`[${user.account}] 下单成功`);
+        log(`[${user.account}] 下单成功`);
     }
 
     return success;
@@ -168,10 +186,10 @@ function queryCurrentOrders(user, INSTRUMENT) {
     const instrument = INSTRUMENT;
     const positionType = 'plan';
     const queryString = `?instrument=${instrument}&positionType=${positionType}&page=1&pageSize=100`;
-    const url = `${config.baseUrl}${apiPath}${queryString}`;
+    const url = `${BASE_URL}${apiPath}${queryString}`;
     const headers = generateSignedHeadersForGet('GET', apiPath, queryString, user.apikey, user.secretkey, user.uid);
 
-    console.log(`[${user.account}] 开始查询订单`);
+    log(`[${user.account}] 开始查询订单`);
 
     const response = http.get(url, {
         headers, tags: {name: 'QueryOrders', account: user.account}
@@ -189,10 +207,10 @@ function queryCurrentOrders(user, INSTRUMENT) {
     });
 
     querySuccessRate.add(success);
-    //  console.info(`查询订单响应体: ${response.body}`);
+    logInfo(`查询订单响应体: ${response.body}`);
 
     if (!success) {
-        //console.error(`[${user.account}] 查询失败: ${response.status} - ${response.body}`);
+        logError(`[${user.account}] 查询失败: ${response.status} - ${response.body}`);
         errorRate.add(1);
         return [];
     }
@@ -203,34 +221,34 @@ function queryCurrentOrders(user, INSTRUMENT) {
         body = body.replace(/("id"\s*:\s*)(\d+)/g, '$1"$2"');
         const parsed = JSON.parse(body);
         const orderIds = parsed.data && parsed.data.rows ? parsed.data.rows.map(order => order.id) : [];
-        console.log(`[${user.account}] 查询到 ${orderIds.length} 个挂单`);
+        log(`[${user.account}] 查询到 ${orderIds.length} 个挂单`);
 
         const hasDuplicates = new Set(orderIds).size !== orderIds.length;
         if (hasDuplicates) {
-            console.log('有重复订单ID');
+            log('有重复订单ID');
         }
 
         return orderIds;
     } catch (e) {
-        console.error(`[${user.account}] 解析查询响应失败: ${e.message}`);
+        logError(`[${user.account}] 解析查询响应失败: ${e.message}`);
         return [];
     }
 }
 
 /**
- 线程1挂底单（1000单，价格不一样，不区分用户），线程2下查全撤（3000tps)
+ * 线程1挂底单（1000单，价格不一样，不区分用户），线程2下查全撤（3000tps)
  * 批量撤单
  */
 function cancelBatchOrders(user, orderIds, INSTRUMENT) {
     if (orderIds.length === 0) {
-        console.log(`[${user.account}] 无挂单，跳过撤单`);
+        log(`[${user.account}] 无挂单，跳过撤单`);
         return true;
     }
 
-    console.log(`[${user.account}] 准备撤销 ${orderIds.length} 个订单`);
+    log(`[${user.account}] 准备撤销 ${orderIds.length} 个订单`);
 
     const apiPath = '/v1/perpum-market/batchOrders';
-    const url = `${config.baseUrl}${apiPath}`;
+    const url = `${BASE_URL}${apiPath}`;
     const payload = {
         sourceIds: orderIds, instrument: INSTRUMENT
     };
@@ -252,16 +270,17 @@ function cancelBatchOrders(user, orderIds, INSTRUMENT) {
             }
         },
     });
-    //  console.info(`撤订单响应体: ${response.body}`);
+
+    logInfo(`撤订单响应体: ${response.body}`);
     cancelSuccessRate.add(success);
 
     if (!success) {
-        //console.error(`[${user.account}] 撤单失败: ${response.status} - ${response.body}`);
+        logError(`[${user.account}] 撤单失败: ${response.status} - ${response.body}`);
         errorRate.add(1);
         return false;
     }
 
-    console.log(`[${user.account}] 批量撤单成功: ${orderIds.length} 个订单`);
+    log(`[${user.account}] 批量撤单成功: ${orderIds.length} 个订单`);
     return true;
 }
 
@@ -276,14 +295,14 @@ export default function () {
     // 批量下单
     const placeOrderSuccess = placeOrders(user, INSTRUMENT);
     if (!placeOrderSuccess) {
-        console.error(`[${user.account}] 下单失败，跳过后续步骤`);
+        logError(`[${user.account}] 下单失败，跳过后续步骤`);
         return;
     }
 
     // 查询订单
     const orderIds = queryCurrentOrders(user, INSTRUMENT);
 
-    console.info(`orderIds=${orderIds}`)
+    logInfo(`orderIds=${orderIds}`)
 
     // 批量撤单
     if (orderIds.length > 0) {
