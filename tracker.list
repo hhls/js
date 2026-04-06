@@ -1,7 +1,6 @@
 # ======================================================
-# 中国常见 Tracker / Analytics SDK 屏蔽规则
+# 常见 Tracker / Analytics SDK 屏蔽规则
 # 格式：Surge domain-set
-# 用法：DOMAIN-SET,https://example.com/tracker.list,REJECT
 # ======================================================
 
 # ---------- 友盟 Umeng（阿里系）----------
