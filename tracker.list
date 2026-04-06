@@ -1,0 +1,110 @@
+# ======================================================
+# 中国常见 Tracker / Analytics SDK 屏蔽规则
+# 格式：Surge domain-set
+# 用法：DOMAIN-SET,https://example.com/tracker.list,REJECT
+# ======================================================
+
+# ---------- 友盟 Umeng（阿里系）----------
+.umeng.com
+.umengcloud.com
+
+# ---------- Bugly（腾讯）----------
+.bugly.qq.com
+
+# ---------- 腾讯 MTA / Aegis / Beacon ----------
+.mta.qq.com
+.pingma.qq.com
+.aegis.qq.com
+.beacon.qq.com
+
+# ---------- 百度统计 ----------
+.hm.baidu.com
+.tongji.baidu.com
+.mtj.baidu.com
+
+# ---------- 神策数据 ----------
+.sensorsdata.cn
+.sensorsdata.com
+
+# ---------- GrowingIO ----------
+.growingio.com
+
+# ---------- TalkingData ----------
+.talkingdata.com
+.talkingdata.net
+
+# ---------- 字节跳动统计（仅上报子域）----------
+# snssdk.com 主域承载内容业务，勿全域屏蔽
+.mon.snssdk.com
+.log.snssdk.com
+.applog.snssdk.com
+.logapi.snssdk.com
+.slardar.snssdk.com
+.tobrank.com
+
+# ---------- 热云数据 ----------
+.reyun.com
+
+# ---------- 数数科技 ThinkingData ----------
+.thinkingdata.cn
+.thinkingdata.com
+
+# ---------- 诸葛 io ----------
+.zhugeio.com
+
+# ---------- 极光推送（仅统计子域）----------
+# jpush.cn 主域承载推送，勿全域屏蔽
+.stats.jpush.cn
+.gd-stats.jpush.cn
+.analytics.jpush.cn
+
+# ---------- 个推 Getui ----------
+.igetui.com
+.igexin.com
+
+# ---------- 小米推送（仅统计子域）----------
+.analytics.xmpush.xiaomi.com
+.stat.mipush.xiaomi.com
+
+# ---------- 华为推送（仅统计子域）----------
+.logservice.cloud.huawei.com
+.metrics.cloud.huawei.com
+
+# ---------- OPPO 推送（仅统计子域）----------
+.statistics.push.oppomobile.com
+
+# ---------- vivo 推送（仅统计子域）----------
+.analytics.push.vivoglobal.com
+.stats.vpush.vivo.com.cn
+
+# ---------- AppLovin ----------
+.applovin.com
+
+# ---------- AppsFlyer ----------
+.appsflyer.com
+
+# ---------- Adjust ----------
+.adjust.com
+.adjust.io
+
+# ---------- Branch.io ----------
+.branch.io
+.app.link
+
+# ---------- Kochava ----------
+.kochava.com
+
+# ---------- 穿山甲 Pangle ----------
+.pangolin.com
+.pangle.io
+
+# ---------- 快手广告 ----------
+.ad.gifshow.com
+.ktrack.kuaishou.com
+
+# ---------- 阿里云 SLS 日志上报 ----------
+.log.aliyuncs.com
+
+# ---------- 腾讯云 CLS 日志上报 ----------
+.cls.tencentcs.com
+.cls.tencentyun.com
