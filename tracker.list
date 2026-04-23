@@ -1,109 +1,118 @@
 # ======================================================
-# 常见 Tracker / Analytics SDK 屏蔽规则
-# 格式：Surge domain-set
+# 极致隐私版（强力拦截）
 # ======================================================
 
-# ---------- 友盟 Umeng（阿里系）----------
+# ---------- 国内统计 ----------
 .umeng.com
 .umengcloud.com
+.umtrack.com
 
-# ---------- Bugly（腾讯）----------
-.bugly.qq.com
-
-# ---------- 腾讯 MTA / Aegis / Beacon ----------
 .mta.qq.com
 .pingma.qq.com
 .aegis.qq.com
 .beacon.qq.com
+.report.qq.com
+.trace.qq.com
 
-# ---------- 百度统计 ----------
 .hm.baidu.com
 .tongji.baidu.com
 .mtj.baidu.com
+.datax.baidu.com
 
-# ---------- 神策数据 ----------
 .sensorsdata.cn
 .sensorsdata.com
+.sa-sdk.cn
 
-# ---------- GrowingIO ----------
 .growingio.com
+.growingio.net
 
-# ---------- TalkingData ----------
 .talkingdata.com
 .talkingdata.net
 
-# ---------- 字节跳动统计（仅上报子域）----------
-# snssdk.com 主域承载内容业务，勿全域屏蔽
-.mon.snssdk.com
-.log.snssdk.com
-.applog.snssdk.com
-.logapi.snssdk.com
-.slardar.snssdk.com
-.tobrank.com
-
-# ---------- 热云数据 ----------
-.reyun.com
-
-# ---------- 数数科技 ThinkingData ----------
 .thinkingdata.cn
 .thinkingdata.com
 
-# ---------- 诸葛 io ----------
 .zhugeio.com
+.reyun.com
+.reyun.cn
 
-# ---------- 极光推送（仅统计子域）----------
-# jpush.cn 主域承载推送，勿全域屏蔽
-.stats.jpush.cn
-.gd-stats.jpush.cn
-.analytics.jpush.cn
+# ---------- 字节（全埋点链路）----------
+.applog.snssdk.com
+.log.snssdk.com
+.logapi.snssdk.com
+.mon.snssdk.com
+.slardar.snssdk.com
+.mcs.snssdk.com
+.toblog.snssdk.com
+.tobapplog.snssdk.com
 
-# ---------- 个推 Getui ----------
-.igetui.com
-.igexin.com
-
-# ---------- 小米推送（仅统计子域）----------
-.analytics.xmpush.xiaomi.com
-.stat.mipush.xiaomi.com
-
-# ---------- 华为推送（仅统计子域）----------
-.logservice.cloud.huawei.com
-.metrics.cloud.huawei.com
-
-# ---------- OPPO 推送（仅统计子域）----------
-.statistics.push.oppomobile.com
-
-# ---------- vivo 推送（仅统计子域）----------
-.analytics.push.vivoglobal.com
-.stats.vpush.vivo.com.cn
-
-# ---------- AppLovin ----------
-.applovin.com
-
-# ---------- AppsFlyer ----------
+# ---------- 广告归因 ----------
 .appsflyer.com
+.t.appsflyer.com
 
-# ---------- Adjust ----------
 .adjust.com
 .adjust.io
 
-# ---------- Branch.io ----------
 .branch.io
 .app.link
 
-# ---------- Kochava ----------
 .kochava.com
+.applovin.com
+.sdk.applovin.com
 
-# ---------- 穿山甲 Pangle ----------
-.pangolin.com
 .pangle.io
+.pangolin.com
 
-# ---------- 快手广告 ----------
 .ad.gifshow.com
 .ktrack.kuaishou.com
 
-# ---------- 阿里云 SLS 日志上报 ----------
-.log.aliyuncs.com
+# ---------- 海外分析体系 ----------
+.google-analytics.com
+.analytics.google.com
+.app-measurement.com
 
-# ---------- 腾讯云 CLS 日志上报 ----------
+.firebaseinstallations.googleapis.com
+.firebaselogging.googleapis.com
+
+.sentry.io
+.ingest.sentry.io
+
+.crashlytics.com
+.settings.crashlytics.com
+
+.appcenter.ms
+.in.appcenter.ms
+
+.newrelic.com
+
+.mixpanel.com
+.api.mixpanel.com
+
+.amplitude.com
+.api.amplitude.com
+
+.segment.com
+.api.segment.io
+
+.airbridge.io
+.singular.net
+.tenjin.io
+
+# ---------- 云日志 ----------
+.log.aliyuncs.com
 .cls.tencentcs.com
 .cls.tencentyun.com
+
+# ---------- 推送（仍然保守，不动主域）----------
+.stats.jpush.cn
+.analytics.jpush.cn
+.sdk.open.phone.igexin.com
+
+.analytics.xmpush.xiaomi.com
+.stat.mipush.xiaomi.com
+
+.logservice.cloud.huawei.com
+.metrics.cloud.huawei.com
+
+.statistics.push.oppomobile.com
+.analytics.push.vivoglobal.com
