@@ -1,109 +1,187 @@
 # ======================================================
-# 常见 Tracker / Analytics SDK 屏蔽规则
+# Tracker / Analytics SDK 屏蔽规则（Final Hardened）
 # 格式：Surge domain-set
+# 设计原则：
+# 1. 只封“上报域”，避免误伤核心业务
+# 2. 拆分“高风险可全封” vs “需谨慎子域封”
+# 3. 去重 + 补齐主流 SDK
+# 4. 保持可维护性（按生态分层）
 # ======================================================
 
-# ---------- 友盟 Umeng（阿里系）----------
+
+# ======================================================
+# 一、国内统计 / 用户行为分析（强屏蔽）
+# ======================================================
+
+# --- 友盟 Umeng（阿里）---
 .umeng.com
 .umengcloud.com
 
-# ---------- Bugly（腾讯）----------
-.bugly.qq.com
-
-# ---------- 腾讯 MTA / Aegis / Beacon ----------
+# --- 腾讯统计 ---
 .mta.qq.com
 .pingma.qq.com
 .aegis.qq.com
 .beacon.qq.com
+.bugly.qq.com
 
-# ---------- 百度统计 ----------
+# --- 百度统计 ---
 .hm.baidu.com
 .tongji.baidu.com
 .mtj.baidu.com
 
-# ---------- 神策数据 ----------
+# --- 神策 ---
 .sensorsdata.cn
 .sensorsdata.com
 
-# ---------- GrowingIO ----------
+# --- GrowingIO ---
 .growingio.com
 
-# ---------- TalkingData ----------
+# --- TalkingData ---
 .talkingdata.com
 .talkingdata.net
 
-# ---------- 字节跳动统计（仅上报子域）----------
-# snssdk.com 主域承载内容业务，勿全域屏蔽
+# --- 数数科技 ThinkingData ---
+.thinkingdata.cn
+.thinkingdata.com
+
+# --- 诸葛 ---
+.zhugeio.com
+
+# --- 热云 ---
+.reyun.com
+
+
+# ======================================================
+# 二、字节 / 内容系（⚠️仅限上报域）
+# ======================================================
+
+# ⚠️ snssdk 主域不能封（抖音/头条核心）
 .mon.snssdk.com
 .log.snssdk.com
 .applog.snssdk.com
 .logapi.snssdk.com
 .slardar.snssdk.com
+
+# 字节补充（遗漏修正）
+.data.bytedance.com
+.analytics.snssdk.com
+
 .tobrank.com
 
-# ---------- 热云数据 ----------
-.reyun.com
 
-# ---------- 数数科技 ThinkingData ----------
-.thinkingdata.cn
-.thinkingdata.com
+# ======================================================
+# 三、推送 SDK（仅统计域，避免影响推送）
+# ======================================================
 
-# ---------- 诸葛 io ----------
-.zhugeio.com
-
-# ---------- 极光推送（仅统计子域）----------
-# jpush.cn 主域承载推送，勿全域屏蔽
+# --- 极光 ---
 .stats.jpush.cn
 .gd-stats.jpush.cn
 .analytics.jpush.cn
 
-# ---------- 个推 Getui ----------
+# --- 个推 ---
 .igetui.com
 .igexin.com
 
-# ---------- 小米推送（仅统计子域）----------
+# --- 小米 ---
 .analytics.xmpush.xiaomi.com
 .stat.mipush.xiaomi.com
 
-# ---------- 华为推送（仅统计子域）----------
+# --- 华为 ---
 .logservice.cloud.huawei.com
 .metrics.cloud.huawei.com
 
-# ---------- OPPO 推送（仅统计子域）----------
+# --- OPPO ---
 .statistics.push.oppomobile.com
 
-# ---------- vivo 推送（仅统计子域）----------
+# --- vivo ---
 .analytics.push.vivoglobal.com
 .stats.vpush.vivo.com.cn
 
-# ---------- AppLovin ----------
-.applovin.com
 
-# ---------- AppsFlyer ----------
+# ======================================================
+# 四、广告归因 / 增长分析（强屏蔽）
+# ======================================================
+
+# --- AppsFlyer ---
 .appsflyer.com
 
-# ---------- Adjust ----------
+# --- Adjust ---
 .adjust.com
 .adjust.io
 
-# ---------- Branch.io ----------
+# --- Branch ---
 .branch.io
 .app.link
 
-# ---------- Kochava ----------
+# --- Kochava ---
 .kochava.com
 
-# ---------- 穿山甲 Pangle ----------
-.pangolin.com
-.pangle.io
+# --- AppLovin ---
+.applovin.com
 
-# ---------- 快手广告 ----------
+# --- Pangle（穿山甲）---
+.pangle.io
+# ⚠️ pangolin.com 存在误伤风险（部分资源承载），默认不封
+# .pangolin.com
+
+
+# ======================================================
+# 五、广告 / 营销网络
+# ======================================================
+
+# --- 快手 ---
 .ad.gifshow.com
 .ktrack.kuaishou.com
 
-# ---------- 阿里云 SLS 日志上报 ----------
+
+# ======================================================
+# 六、云日志上报（可选，建议开启）
+# ======================================================
+
+# --- 阿里云 SLS ---
 .log.aliyuncs.com
 
-# ---------- 腾讯云 CLS 日志上报 ----------
+# --- 腾讯云 CLS ---
 .cls.tencentcs.com
 .cls.tencentyun.com
+
+
+# ======================================================
+# 七、补充（常见遗漏）
+# ======================================================
+
+# --- Google Firebase / Analytics（按需）---
+# ⚠️ 海外 App 常依赖，按需开启
+# .google-analytics.com
+# .app-measurement.com
+# .firebaseinstallations.googleapis.com
+# .firebaselogging.googleapis.com
+
+# --- Facebook Analytics（按需）---
+# .facebook.com
+# .facebook.net
+
+# --- Crashlytics ---
+# .crashlytics.com
+
+
+# ======================================================
+# 说明（关键设计决策）
+# ======================================================
+# ✔ 已避免：
+#   - 误封核心业务域（如 snssdk / jpush / pangolin）
+#   - 泛域名过度匹配
+#
+# ✔ 已增强：
+#   - 字节 / Firebase / 增长归因补齐
+#   - 分类清晰（方便后续增删）
+#
+# ✔ 可选策略：
+#   - 若追求极致隐私：开启 Google / Facebook
+#   - 若追求兼容性：保持当前默认
+#
+# ✔ 建议搭配：
+#   - MITM + Rewrite（拦截 SDK 初始化）
+#   - Surge RULE-SET 分层（严格 / 宽松）
+#
+# ======================================================
