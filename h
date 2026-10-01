@@ -231,7 +231,7 @@ ensure_firewall_for_porthop() {
   err "端口跳跃需要 CAP_NET_ADMIN；仅 root 或装了 nft/iptables 不够"
   maybe_container_hint
   echo "  处理办法："
-  echo "    1) 重新配置时选「不启用端口跳跃」（单端口即可正常跑）"
+  echo "    1) 卸载重装时选「不启用端口跳跃」（单端口即可正常跑）"
   echo "    2) Docker/Podman rootful 示例："
   echo "       --cap-add=NET_ADMIN --network=host"
   echo "       （rootless Podman 一般仍会失败，见上方说明）"
@@ -247,7 +247,7 @@ diagnose_service_failure() {
     echo "  配置里 listen 若是 起始-结束 范围，服务端会调 nft/iptables 做 UDP 重定向"
     echo "  当前环境没有 CAP_NET_ADMIN 时会启动失败"
     maybe_container_hint
-    echo "  建议：菜单选 2 重新配置 → 端口跳跃选 n（单端口）"
+    echo "  建议：卸载后重新安装，端口跳跃选 n（单端口）"
     return 0
   fi
   if echo "$log" | grep -qiE 'permission denied|bind: address already in use|address already in use'; then
@@ -458,175 +458,8 @@ maybe_apply_stability_tune() {
   fi
 }
 
-stability_tune_menu() {
-  need_root
-  while true; do
-    echo
-    echo -e "${C_BOLD}------ 稳定性调优（UDP 缓冲）------${C_RESET}"
-    echo "  1) 查看状态"
-    echo "  2) 应用调优（推荐，只升不降）"
-    echo "  3) 撤销调优"
-    echo "  0) 返回"
-    local c
-    c="$(prompt "请选择" "1")"
-    case "$c" in
-      1) udp_buffer_status ;;
-      2) apply_udp_buffer_tune ;;
-      3)
-        if prompt_yn "确认撤销 UDP 缓冲区调优？" "n"; then
-          revert_udp_buffer_tune
-        else
-          info "已取消"
-        fi
-        ;;
-      0) return 0 ;;
-      *) warn "无效选项" ;;
-    esac
-  done
-}
 
-ensure_yaml_deps() {
-  if python3 -c 'import yaml' >/dev/null 2>&1; then
-    return 0
-  fi
-  if has_cmd apk; then
-    pkg_install python3 py3-yaml || return 1
-  elif has_cmd dnf || has_cmd yum; then
-    pkg_install python3 python3-pyyaml || return 1
-  else
-    pkg_install python3 python3-yaml || return 1
-  fi
-  python3 -c 'import yaml' >/dev/null 2>&1 || {
-    err "需要 Python 3 与 PyYAML，请安装发行版的 YAML 包后重试"
-    return 1
-  }
-}
 
-config_yaml() {
-  python3 - "$@" <<'PY'
-import copy, os, re, sys
-import yaml
-class Loader(yaml.SafeLoader):
-    pass
-def mapping(loader, node, deep=False):
-    loader.flatten_mapping(node)
-    result = {}
-    for k, v in node.value:
-        key = loader.construct_object(k, deep=deep)
-        if key in result:
-            raise ValueError('duplicate YAML key')
-        result[key] = loader.construct_object(v, deep=deep)
-    return result
-Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
-def load(path):
-    with open(path, encoding='utf-8') as f:
-        data = yaml.load(f, Loader=Loader)
-    if not isinstance(data, dict):
-        raise ValueError('configuration must be a mapping')
-    return data
-def text(value):
-    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
-        raise ValueError('expected scalar string or number')
-    value = str(value)
-    if any(ord(c) < 32 for c in value):
-        raise ValueError('control characters are not supported')
-    return value
-try:
-    mode, path = sys.argv[1:3]
-    data = load(path)
-    if mode == 'validate':
-        pass
-    elif mode == 'snapshot':
-        auth = data.get('auth', {})
-        if auth.get('type') != 'password' or not isinstance(auth.get('password'), str) or not auth['password']:
-            raise ValueError('interactive reconfiguration requires password authentication')
-        if data.get('obfs', {}).get('type', 'salamander') != 'salamander':
-            raise ValueError('unsupported obfuscation for client export; edit manually')
-        listen = text(data.get('listen', ':443'))
-        port = listen.rsplit(':', 1)[-1]
-        if not re.fullmatch(r'[0-9]+(?:-[0-9]+)?', port):
-            raise ValueError('unsupported listen format; edit manually')
-        bind = listen[:-len(port)]
-        client_path = sys.argv[3]
-        client = load(client_path) if os.path.isfile(client_path) else {}
-        server = text(client.get('server', ''))
-        if server.startswith(('hysteria2://', 'hy2://', 'realm://')):
-            raise ValueError('URI client configuration requires manual export')
-        host = server.rsplit(':', 1)[0].strip('[]') if ':' in server else server
-        bw = data.get('bandwidth') or {}
-        tls = data.get('tls', {})
-        acme = data.get('acme', {})
-        if not tls and not acme:
-            raise ValueError('TLS configuration missing; edit manually')
-        values = {
-            'CFG_LISTEN': port, 'CFG_BIND_PREFIX': bind or ':',
-            'CFG_AUTH_PASS': auth['password'],
-            'CFG_BW_UP': bw.get('up', ''), 'CFG_BW_DOWN': bw.get('down', ''),
-            'CFG_DISABLE_LOSS_COMP': int(bool(bw.get('disableLossCompensation', False))),
-            'CFG_SNIFF': int(bool((data.get('sniff') or {}).get('enable', False))),
-            'CFG_SPEEDTEST': int(bool(data.get('speedTest', False))),
-            'CFG_CERT_MODE': 'acme' if acme else 'self',
-            'CFG_SNI': client.get('tls', {}).get('sni', (acme.get('domains') or [''])[0]),
-            'CFG_INSECURE': int(bool(client.get('tls', {}).get('insecure', not bool(acme)))),
-            'CERT_FILE': tls.get('cert', ''), 'KEY_FILE': tls.get('key', ''),
-            'CFG_SERVER_ADDR': host,
-            'CFG_HOP_INTERVAL': client.get('transport', {}).get('udp', {}).get('hopInterval', '30s'),
-            'CFG_OBFS': int(bool(data.get('obfs'))),
-            'CFG_OBFS_PASS': data.get('obfs', {}).get('salamander', {}).get('password', ''),
-            'CFG_MASQ_TYPE': data.get('masquerade', {}).get('type', 'none'),
-            'CFG_MASQ_TCP': int(bool(data.get('masquerade', {}).get('listenHTTP') or data.get('masquerade', {}).get('listenHTTPS'))),
-        }
-        for key, value in values.items():
-            sys.stdout.buffer.write((key + '\0' + text(value) + '\0').encode())
-    elif mode == 'client':
-        old = load(sys.argv[3])
-        def merge(dst, src):
-            for key, value in src.items():
-                if isinstance(value, dict) and isinstance(dst.get(key), dict):
-                    merge(dst[key], value)
-                else:
-                    dst[key] = value
-        for key in ('up', 'down'):
-            if key not in data.get('bandwidth', {}):
-                (old.get('bandwidth') or {}).pop(key, None)
-        if 'obfs' not in data:
-            old.pop('obfs', None)
-        if 'pinSHA256' not in data.get('tls', {}):
-            (old.get('tls') or {}).pop('pinSHA256', None)
-        if 'transport' not in data:
-            for key in ('hopInterval', 'minHopInterval', 'maxHopInterval'):
-                ((old.get('transport') or {}).get('udp') or {}).pop(key, None)
-        else:
-            for key in ('minHopInterval', 'maxHopInterval'):
-                ((old.get('transport') or {}).get('udp') or {}).pop(key, None)
-        merge(old, data)
-        yaml.safe_dump(old, sys.stdout, allow_unicode=True, sort_keys=False)
-    elif mode == 'patch':
-        data = copy.deepcopy(data)
-        data['listen'] = os.environ['CFG_BIND_PREFIX'] + os.environ['CFG_LISTEN']
-        bw = data.get('bandwidth')
-        if bw is None:
-            bw = data['bandwidth'] = {}
-        for key, env in [('up', 'CFG_BW_UP'), ('down', 'CFG_BW_DOWN')]:
-            if os.environ[env]:
-                bw[key] = os.environ[env]
-            else:
-                bw.pop(key, None)
-        bw['disableLossCompensation'] = os.environ['CFG_DISABLE_LOSS_COMP'] == '1'
-        data['auth']['password'] = os.environ['CFG_AUTH_PASS']
-        sniff = data.get('sniff')
-        if sniff is None:
-            sniff = data['sniff'] = {}
-        sniff['enable'] = os.environ['CFG_SNIFF'] == '1'
-        data['speedTest'] = os.environ['CFG_SPEEDTEST'] == '1'
-        yaml.safe_dump(data, sys.stdout, allow_unicode=True, sort_keys=False)
-    else:
-        raise ValueError('unknown mode')
-except Exception:
-    print('配置解析失败：检查 YAML、重复键、认证/TLS 类型及客户端导出格式；原配置未被改写。', file=sys.stderr)
-    sys.exit(1)
-PY
-}
 
 valid_cert_pair() {
   local cert_pub key_pub
@@ -686,137 +519,15 @@ validate_connection_inputs() {
   fi
 }
 
-backup_configuration() {
-  CONFIG_BACKUP_DIR="$(mktemp -d "${CONFIG_DIR}/backup-$(date +%Y%m%d-%H%M%S).XXXXXX")" || return 1
-  chmod 700 "$CONFIG_BACKUP_DIR" || return 1
-  local file
-  for file in "$CONFIG_FILE" "$CERT_FILE" "$KEY_FILE"; do
-    if [[ -n "$file" && -f "$file" ]]; then
-      case "$file" in
-        "$CONFIG_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/config.yaml" || return 1 ;;
-        "$CERT_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/server.crt" || return 1 ;;
-        "$KEY_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/server.key" || return 1 ;;
-      esac
-    fi
-  done
-  info "配置与证书备份: $CONFIG_BACKUP_DIR"
-}
 
 commit_config() {
   local candidate="$1"
-  if ! config_yaml validate "$candidate"; then
-    rm -f "$candidate"
-    return 1
-  fi
-  if [[ -f "$CONFIG_FILE" ]]; then
-    backup_configuration || { rm -f "$candidate"; return 1; }
-  fi
   chmod 600 "$candidate" || return 1
   fix_owner "$candidate"
   mv -f "$candidate" "$CONFIG_FILE" || return 1
 }
 
-apply_config_service() {
-  if start_service; then
-    return 0
-  fi
-  if [[ -n "${CONFIG_BACKUP_DIR:-}" && -f "$CONFIG_BACKUP_DIR/config.yaml" ]]; then
-    local restore
-    restore="$(mktemp "${CONFIG_DIR}/.restore.XXXXXX")" || return 1
-    cp -p "$CONFIG_BACKUP_DIR/config.yaml" "$restore" || return 1
-    mv -f "$restore" "$CONFIG_FILE" || return 1
-    warn "新配置启动失败，已恢复旧配置；备份: $CONFIG_BACKUP_DIR"
-    if systemctl restart "$SERVICE_NAME" && systemctl is-active --quiet "$SERVICE_NAME"; then
-      info "旧配置服务已恢复"
-    else
-      err "旧配置服务也未能恢复，请检查 journalctl -u $SERVICE_NAME"
-    fi
-  fi
-  return 1
-}
 
-reconfigure_existing() {
-  ensure_yaml_deps || return 1
-  CONFIG_BACKUP_DIR=""
-  local snapshot name value candidate choice pass
-  snapshot="$(mktemp "${CONFIG_DIR}/.snapshot.XXXXXX")" || return 1
-  if ! config_yaml snapshot "$CONFIG_FILE" "${CONFIG_DIR}/client.yaml" >"$snapshot"; then
-    rm -f "$snapshot"
-    return 1
-  fi
-  while IFS= read -r -d '' name && IFS= read -r -d '' value; do
-    case "$name" in
-      CFG_*|CERT_FILE|KEY_FILE) printf -v "$name" '%s' "$value" ;;
-    esac
-  done <"$snapshot"
-  rm -f "$snapshot"
-  CFG_IS_RANGE=0
-  [[ "$CFG_LISTEN" == *-* ]] && CFG_IS_RANGE=1
-  info "复用现有证书、密码和高级配置；回车保留当前值"
-  CFG_LISTEN="$(prompt "监听端口或范围" "$CFG_LISTEN")"
-  local start end
-  if [[ "$CFG_LISTEN" =~ ^([0-9]{1,5})(-([0-9]{1,5}))?$ ]]; then
-    start=$((10#${BASH_REMATCH[1]}))
-    end=$start
-    [[ -z "${BASH_REMATCH[3]}" ]] || end=$((10#${BASH_REMATCH[3]}))
-    ((start >= 1 && end <= 65535 && start <= end)) || { err "端口范围无效"; return 1; }
-    CFG_IS_RANGE=0
-    if [[ "$CFG_LISTEN" == *-* ]]; then
-      CFG_IS_RANGE=1
-      ensure_firewall_for_porthop
-      CFG_HOP_INTERVAL="$(prompt "客户端跳端口间隔" "$CFG_HOP_INTERVAL")"
-      info "请在云厂商 Security List / NSG 和本机防火墙放行 UDP $CFG_LISTEN"
-    fi
-  else
-    err "端口须为 1-65535 或 起始-结束"
-    return 1
-  fi
-  CFG_BW_UP="$(prompt "服务端 up（每客户端；none 不设限制）" "$CFG_BW_UP")"
-  CFG_BW_DOWN="$(prompt "服务端 down（每客户端；none 不设限制）" "$CFG_BW_DOWN")"
-  [[ "$CFG_BW_UP" != "none" ]] || CFG_BW_UP=""
-  [[ "$CFG_BW_DOWN" != "none" ]] || CFG_BW_DOWN=""
-  choice=n; [[ "$CFG_DISABLE_LOSS_COMP" == "1" ]] && choice=y
-  CFG_DISABLE_LOSS_COMP=0
-  if prompt_yn "关闭服务端发送方向丢包补偿？" "$choice"; then CFG_DISABLE_LOSS_COMP=1; fi
-  choice=n; [[ "$CFG_SNIFF" == "1" ]] && choice=y
-  CFG_SNIFF=0
-  if prompt_yn "启用 sniff（域名识别/ACL）？" "$choice"; then CFG_SNIFF=1; fi
-  choice=n; [[ "$CFG_SPEEDTEST" == "1" ]] && choice=y
-  CFG_SPEEDTEST=0
-  if prompt_yn "启用内置测速？" "$choice"; then CFG_SPEEDTEST=1; fi
-  if prompt_yn "更换认证密码（现有客户端须更新）？" "n"; then
-    pass="$(prompt "新认证密码（回车随机）" "$(rand_password)")"
-    CFG_AUTH_PASS="$pass"
-  fi
-  CFG_SERVER_ADDR="$(prompt "客户端连接地址（IP 或域名）" "${CFG_SERVER_ADDR:-$(detect_public_ip)}")"
-  if [[ -z "$CFG_SNI" && -r "$CERT_FILE" ]]; then
-    CFG_SNI="$(openssl x509 -in "$CERT_FILE" -noout -subject -nameopt multiline 2>/dev/null | sed -n 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*//p')"
-  fi
-  CFG_SNI="$(prompt "客户端 SNI" "$CFG_SNI")"
-  if [[ "$CFG_CERT_MODE" == "self" ]]; then
-    if ! valid_cert_pair; then
-      err "现有 TLS 证书/密钥无效、不匹配或已过期，请先修复；不会自动轮换证书"
-      return 1
-    fi
-  fi
-  validate_connection_inputs || return 1
-  CFG_EXPORT_DIR="$(prompt "连接信息保存目录" "$(resolve_export_dir)")"
-  CFG_EXPORT_DIR="${CFG_EXPORT_DIR:-$(pwd -P)}"
-  [[ "$CFG_EXPORT_DIR" == /* ]] || CFG_EXPORT_DIR="$(pwd -P)/$CFG_EXPORT_DIR"
-  candidate="$(mktemp "${CONFIG_DIR}/.config.XXXXXX")" || return 1
-  if ! CFG_BIND_PREFIX="$CFG_BIND_PREFIX" CFG_LISTEN="$CFG_LISTEN" \
-    CFG_BW_UP="$CFG_BW_UP" CFG_BW_DOWN="$CFG_BW_DOWN" \
-    CFG_DISABLE_LOSS_COMP="$CFG_DISABLE_LOSS_COMP" CFG_AUTH_PASS="$CFG_AUTH_PASS" \
-    CFG_SNIFF="$CFG_SNIFF" CFG_SPEEDTEST="$CFG_SPEEDTEST" \
-    config_yaml patch "$CONFIG_FILE" >"$candidate"; then
-    rm -f "$candidate"
-    return 1
-  fi
-  commit_config "$candidate" || return 1
-  apply_config_service || return 1
-  maybe_apply_stability_tune
-  export_connection_info
-}
 
 run_official_installer() {
   local installer status=0
@@ -833,17 +544,6 @@ run_official_installer() {
 
 install_binary() {
   title "安装 / 升级"
-  if [[ -x "$HY2_BIN" ]]; then
-    local ver
-    ver="$($HY2_BIN version 2>/dev/null | head -1 || echo "$HY2_BIN")"
-    info "本机已安装: $ver"
-    echo "  y = 调用官方脚本，升级到最新版"
-    echo "  n = 不升级，保留当前版本，直接进入配置（默认）"
-    if ! prompt_yn "是否升级二进制？" "n"; then
-      info "已跳过升级，继续使用当前版本"
-      return 0
-    fi
-  fi
   run_official_installer || return 1
   if [[ ! -x "$HY2_BIN" ]]; then
     err "安装失败：找不到 $HY2_BIN"
@@ -1142,11 +842,6 @@ export_connection_info() (
 
   build_summary >"$stage/connection.txt" || return 1
   build_client_yaml >"$stage/client.yaml" || return 1
-  if [[ -f "${CONFIG_DIR}/client.yaml" ]]; then
-    config_yaml client "$stage/client.yaml" "${CONFIG_DIR}/client.yaml" >"$stage/client-merged.yaml" || return 1
-    mv -f "$stage/client-merged.yaml" "$stage/client.yaml" || return 1
-  fi
-  config_yaml validate "$stage/client.yaml" || return 1
   build_share_uri >"$stage/share-uri.txt" || return 1
   printf '\n' >>"$stage/share-uri.txt" || return 1
   build_surge_line >"$stage/surge-proxy.txt" || return 1
@@ -1204,100 +899,16 @@ start_service() {
   fi
 }
 
-require_service_unit() {
-  if ! systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-    err "未找到 systemd 服务 ${SERVICE_NAME}（请先安装）"
-    return 1
-  fi
-  return 0
-}
 
-start_service_now() {
-  title "启动服务"
-  require_service_unit || return 1
-  systemctl start "$SERVICE_NAME"
-  sleep 1
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    info "服务已启动: $SERVICE_NAME"
-  else
-    warn "启动失败"
-    diagnose_service_failure
-    echo "  完整日志: journalctl -u $SERVICE_NAME -n 50 --no-pager"
-  fi
-  systemctl --no-pager --full status "$SERVICE_NAME" || true
-}
 
-stop_service() {
-  title "停止服务"
-  require_service_unit || return 1
-  systemctl stop "$SERVICE_NAME"
-  sleep 1
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    warn "服务仍在运行: $SERVICE_NAME"
-  else
-    info "服务已停止: $SERVICE_NAME"
-  fi
-  if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-    warn "开机自启仍为开启（重启机器后会再次启动）。可选用「关闭开机自启」。"
-  else
-    info "开机自启: 已关闭"
-  fi
-  systemctl --no-pager --full status "$SERVICE_NAME" || true
-}
 
-enable_service() {
-  title "开启开机自启"
-  require_service_unit || return 1
-  systemctl enable "$SERVICE_NAME"
-  if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-    info "已设置开机自启: $SERVICE_NAME"
-  else
-    warn "设置开机自启可能失败，请手动检查: systemctl is-enabled $SERVICE_NAME"
-  fi
-  if prompt_yn "是否同时立即启动服务？" "y"; then
-    systemctl start "$SERVICE_NAME"
-    sleep 1
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-      info "服务已启动"
-    else
-      warn "启动失败，请检查日志"
-    fi
-  fi
-  systemctl --no-pager --full status "$SERVICE_NAME" || true
-}
 
-disable_service() {
-  title "关闭开机自启"
-  require_service_unit || return 1
-  systemctl disable "$SERVICE_NAME"
-  if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-    warn "关闭开机自启可能失败"
-  else
-    info "已关闭开机自启: $SERVICE_NAME"
-  fi
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    if prompt_yn "服务当前仍在运行，是否一并停止？" "y"; then
-      systemctl stop "$SERVICE_NAME"
-      sleep 1
-      if systemctl is-active --quiet "$SERVICE_NAME"; then
-        warn "停止失败"
-      else
-        info "服务已停止"
-      fi
-    else
-      info "服务保持运行；仅下次开机不再自动启动"
-    fi
-  fi
-  systemctl --no-pager --full status "$SERVICE_NAME" || true
-}
 
 interactive_configure() {
-  ensure_yaml_deps || return 1
   if [[ -f "$CONFIG_FILE" ]]; then
-    reconfigure_existing
-    return $?
+    err "已有配置，请先卸载再安装"
+    return 1
   fi
-  CONFIG_BACKUP_DIR=""
   CERT_FILE="${CONFIG_DIR}/server.crt"
   KEY_FILE="${CONFIG_DIR}/server.key"
   title "交互式配置"
@@ -1466,7 +1077,7 @@ interactive_configure() {
     fi
   fi
   write_server_config || return 1
-  apply_config_service || return 1
+  start_service || return 1
 
   maybe_apply_stability_tune
 
@@ -1538,27 +1149,7 @@ show_client() {
   err "尚未生成连接信息，请先安装/配置"
 }
 
-show_server_config() {
-  title "服务端配置 $CONFIG_FILE"
-  if [[ -f "$CONFIG_FILE" ]]; then
-    cat "$CONFIG_FILE"
-  else
-    err "配置文件不存在"
-  fi
-}
 
-restart_service() {
-  title "重启服务"
-  require_service_unit || return 1
-  systemctl restart "$SERVICE_NAME"
-  sleep 1
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    info "服务已重启: $SERVICE_NAME"
-  else
-    warn "重启后未处于运行状态，请检查日志"
-  fi
-  systemctl --no-pager --full status "$SERVICE_NAME" || true
-}
 
 uninstall_all() {
   title "卸载"
@@ -1567,14 +1158,14 @@ uninstall_all() {
     return
   fi
   local keep_cfg=0
-  if prompt_yn "是否保留配置与证书目录 ${CONFIG_DIR}？" "y"; then
+  if prompt_yn "是否保留配置与证书目录 ${CONFIG_DIR}？" "n"; then
     keep_cfg=1
   fi
   local dir
   dir="$(resolve_export_dir)"
   local keep_export=1
   if [[ -n "$dir" && -d "$dir" ]]; then
-    if ! prompt_yn "是否保留 ${dir} 中的连接信息文件？" "y"; then
+    if ! prompt_yn "是否保留 ${dir} 中的连接信息文件？" "n"; then
       keep_export=0
     fi
   fi
@@ -1603,59 +1194,37 @@ uninstall_all() {
 
 full_install() {
   need_root
-  ensure_deps
-  install_binary
-  interactive_configure
+  if [[ -f "$CONFIG_FILE" || -x "$HY2_BIN" ]]; then
+    err "已检测到安装或配置，请先执行 uninstall，再执行 install"
+    return 1
+  fi
+  ensure_deps || return 1
+  install_binary || return 1
+  interactive_configure || return 1
   title "完成"
-  info "管理: sudo bash $SCRIPT_NAME status|start|stop|restart|enable|disable"
-  info "或: systemctl status|start|stop|restart|enable|disable $SERVICE_NAME"
+  info "查看连接: sudo bash $SCRIPT_NAME client"
+  info "更换配置: sudo bash $SCRIPT_NAME uninstall，然后重新 install"
   info "日志: journalctl -u $SERVICE_NAME -f"
-  info "再次查看连接: sudo bash $SCRIPT_NAME client"
-  info "稳定性调优: sudo bash $SCRIPT_NAME tune|tune-status|untune"
 }
 
 main_menu() {
   need_root
   while true; do
     echo
-    echo -e "${C_BOLD}========== 配置管理 ==========${C_RESET}"
-    echo "  1) 安装 / 升级（官方脚本）并配置"
-    echo "  2) 仅重新配置（已安装二进制）"
-    echo "  3) 查看连接信息（摘要 / URI）"
-    echo "  4) 查看服务端配置"
-    echo "  5) 服务状态"
-    echo "  6) 启动服务"
-    echo "  7) 停止服务"
-    echo "  8) 重启服务"
-    echo "  9) 开启开机自启"
-    echo " 10) 关闭开机自启"
-    echo " 11) 系统缓冲调优（UDP）"
-    echo " 12) 卸载"
+    echo "========== 配置管理 =========="
+    echo "  1) 一键安装"
+    echo "  2) 一键卸载"
+    echo "  3) 查看连接信息"
+    echo "  4) 服务状态"
     echo "  0) 退出"
-    echo -e "${C_BOLD}====================================${C_RESET}"
     local choice
     choice="$(prompt "请选择" "1")"
     case "$choice" in
-      1) full_install ;;
-      2)
-        ensure_deps
-        if [[ ! -x "$HY2_BIN" ]]; then
-          err "未检测到 ${HY2_BIN}，请先选 1 安装"
-          continue
-        fi
-        interactive_configure
-        ;;
+      1) full_install || warn "安装未完成" ;;
+      2) uninstall_all || warn "卸载未完成" ;;
       3) show_client ;;
-      4) show_server_config ;;
-      5) show_status ;;
-      6) start_service_now ;;
-      7) stop_service ;;
-      8) restart_service ;;
-      9) enable_service ;;
-      10) disable_service ;;
-      11) stability_tune_menu ;;
-      12) uninstall_all ;;
-      0) exit 0 ;;
+      4) show_status ;;
+      0) return 0 ;;
       *) warn "无效选项" ;;
     esac
   done
@@ -1663,31 +1232,17 @@ main_menu() {
 
 usage() {
   cat <<EOF
-用法: sudo bash $SCRIPT_NAME [命令]
+用法: sudo bash $SCRIPT_NAME [install|uninstall|client|status|help]
 
-无参数进入交互菜单。
-
-命令:
-  install     官方安装 + 交互配置
-  config      仅交互重新配置
-  client      显示连接信息（摘要 / URI）
-  status      服务状态
-  start       启动服务（不改开机自启）
-  stop        停止服务（不改开机自启）
-  restart     重启服务
-  enable      开启开机自启（可询问是否立即启动）
-  disable     关闭开机自启（可询问是否同时停止）
-  tune        应用 UDP 缓冲区稳定性调优
-  tune-status 查看缓冲调优状态
-  untune      撤销缓冲调优
-  uninstall   卸载
+无参数进入菜单。
+  install     一键安装并按提示生成配置
+  uninstall   一键卸载（默认清理配置与连接文件）
+  client      查看连接信息
+  status      查看服务状态
   help        帮助
 
-连接信息默认保存到: 当前工作目录（可交互自定义）
-  connection.txt   摘要 + 分享 URI + 证书指纹 + Surge 行
-  client.yaml      客户端配置（含 pinSHA256）
-  share-uri.txt    仅 URI
-  surge-proxy.txt  Surge [Proxy] 策略行
+需要更新配置时，先卸载再重新安装。
+连接信息默认保存到当前目录，可在安装时指定。
 EOF
 }
 
@@ -1696,17 +1251,8 @@ main() {
   case "$cmd" in
     menu)      main_menu ;;
     install)   full_install ;;
-    config)    need_root; ensure_deps; interactive_configure ;;
     client)    show_client ;;
     status)    need_root; show_status ;;
-    start)     need_root; start_service_now ;;
-    stop)      need_root; stop_service ;;
-    restart)   need_root; restart_service ;;
-    enable)    need_root; enable_service ;;
-    disable)   need_root; disable_service ;;
-    tune)      need_root; apply_udp_buffer_tune ;;
-    tune-status) need_root; udp_buffer_status ;;
-    untune)    need_root; revert_udp_buffer_tune ;;
     uninstall) need_root; uninstall_all ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;
