@@ -40,7 +40,7 @@ CFG_OBFS_PASS=""
 CFG_BW_UP="$DEFAULT_BW_UP"
 CFG_BW_DOWN="$DEFAULT_BW_DOWN"
 CFG_DISABLE_LOSS_COMP=1
-CFG_SNIFF=1
+CFG_SNIFF=0
 CFG_SPEEDTEST=0
 CFG_SERVER_ADDR=""
 CFG_EXPORT_DIR=""
@@ -53,7 +53,7 @@ if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
   C_BOLD=$(tput bold)
   C_RESET=$(tput sgr0)
 else
-  C_RED= C_GREEN= C_YELLOW= C_BLUE= C_BOLD= C_RESET=
+  C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_BOLD='' C_RESET=''
 fi
 
 info()  { echo -e "${C_GREEN}[+]${C_RESET} $*"; }
@@ -89,9 +89,9 @@ prompt_yn() {
   local ans
   while true; do
     ans="$(prompt "$msg (y/n)" "$def")"
-    case "${ans,,}" in
-      y|yes) return 0 ;;
-      n|no)  return 1 ;;
+    case "$ans" in
+      [yY]|[yY][eE][sS]) return 0 ;;
+      [nN]|[nN][oO])  return 1 ;;
       *) warn "请输入 y 或 n" ;;
     esac
   done
@@ -283,11 +283,11 @@ raise_sysctl_if_lower() {
   local key="$1" target="$2" cur
   cur="$(read_sysctl_int "$key")"
   if [[ -z "$cur" ]]; then
-    warn "无法读取 $key，跳过"
+    warn "无法读取 ${key}，跳过"
     return 1
   fi
   if ((cur >= target)); then
-    info "$key = $cur（已 ≥ ${target}，不降低）"
+    info "$key = ${cur}（已 ≥ ${target}，不降低）"
     return 0
   fi
   if sysctl -w "${key}=${target}" >/dev/null 2>&1; then
@@ -311,7 +311,7 @@ udp_buffer_status() {
   echo "  rmem_max   : ${rmem:-未知}"
   echo "  wmem_max   : ${wmem:-未知}"
   if [[ -f "$SYSCTL_DROPIN" ]]; then
-    info "持久化文件: $SYSCTL_DROPIN（已安装，重启后仍生效）"
+    info "持久化文件: ${SYSCTL_DROPIN}（已安装；最终值取决于其它 sysctl 配置加载顺序）"
   else
     warn "持久化文件: 未安装（仅可能为运行时临时值）"
   fi
@@ -336,12 +336,12 @@ apply_udp_buffer_tune() {
     err "未找到 sysctl，请先安装 procps（或发行版等价包）"
     return 1
   fi
-  if [[ ! -d /etc/sysctl.d ]]; then
+  if [[ ! -d "$(dirname "$SYSCTL_DROPIN")" ]]; then
     err "不存在 /etc/sysctl.d，无法持久化（可能是精简容器环境）"
     return 1
   fi
 
-  local cur_r cur_w
+  local cur_r cur_w persist_r persist_w old_r old_w dropin_tmp
   cur_r="$(read_sysctl_int net.core.rmem_max)"
   cur_w="$(read_sysctl_int net.core.wmem_max)"
   if [[ -z "$cur_r" || -z "$cur_w" ]]; then
@@ -358,19 +358,27 @@ EOF
     chmod 644 "$SYSCTL_BACKUP" 2>/dev/null || true
     info "已备份当前值到 $SYSCTL_BACKUP"
   else
-    info "已有备份 $SYSCTL_BACKUP（保留首次备份，不覆盖）"
+    info "已有备份 ${SYSCTL_BACKUP}（保留首次备份，不覆盖）"
   fi
 
-  cat >"$SYSCTL_DROPIN" <<EOF
-net.core.rmem_max = ${UDP_BUF_TARGET}
-net.core.wmem_max = ${UDP_BUF_TARGET}
+  old_r="$(awk '$1 == "net.core.rmem_max" && $2 == "=" {print $3}' "$SYSCTL_DROPIN" 2>/dev/null | tail -1 || true)"
+  old_w="$(awk '$1 == "net.core.wmem_max" && $2 == "=" {print $3}' "$SYSCTL_DROPIN" 2>/dev/null | tail -1 || true)"
+  persist_r=$((cur_r > UDP_BUF_TARGET ? cur_r : UDP_BUF_TARGET))
+  persist_w=$((cur_w > UDP_BUF_TARGET ? cur_w : UDP_BUF_TARGET))
+  if [[ "$old_r" =~ ^[0-9]+$ ]] && ((old_r > persist_r)); then persist_r=$old_r; fi
+  if [[ "$old_w" =~ ^[0-9]+$ ]] && ((old_w > persist_w)); then persist_w=$old_w; fi
+  dropin_tmp="$(mktemp "${SYSCTL_DROPIN}.XXXXXX")" || return 1
+  cat >"$dropin_tmp" <<EOF
+net.core.rmem_max = ${persist_r}
+net.core.wmem_max = ${persist_w}
 EOF
-  chmod 644 "$SYSCTL_DROPIN"
+  chmod 644 "$dropin_tmp"
+  mv -f "$dropin_tmp" "$SYSCTL_DROPIN"
   info "已写入 $SYSCTL_DROPIN"
 
   local ok=0
-  raise_sysctl_if_lower net.core.rmem_max "$UDP_BUF_TARGET" && ok=$((ok + 1)) || true
-  raise_sysctl_if_lower net.core.wmem_max "$UDP_BUF_TARGET" && ok=$((ok + 1)) || true
+  raise_sysctl_if_lower net.core.rmem_max "$persist_r" && ok=$((ok + 1)) || true
+  raise_sysctl_if_lower net.core.wmem_max "$persist_w" && ok=$((ok + 1)) || true
   if ((ok < 2)); then
     warn "运行时应用未完全成功；持久化文件已写，重启后可能仍会加载"
     warn "容器/无特权环境可能无法改 sysctl（需特权或宿主机调优）"
@@ -436,8 +444,8 @@ maybe_apply_stability_tune() {
   wmem="$(read_sysctl_int net.core.wmem_max)"
   if [[ -n "$rmem" && -n "$wmem" ]] && ((rmem >= UDP_BUF_TARGET && wmem >= UDP_BUF_TARGET)); then
     info "缓冲已达标（rmem=${rmem} wmem=${wmem}）"
-    if [[ ! -f "$SYSCTL_DROPIN" ]]; then
-      info "运行时已达标但缺持久化文件，补写 $SYSCTL_DROPIN"
+    if [[ ! -f "$SYSCTL_DROPIN" ]] || ! awk -v r="$rmem" -v w="$wmem" '$1 == "net.core.rmem_max" && $3 >= r {a=1} $1 == "net.core.wmem_max" && $3 >= w {b=1} END {exit !(a && b)}' "$SYSCTL_DROPIN"; then
+      info "同步当前较高值到持久化文件: $SYSCTL_DROPIN"
       apply_udp_buffer_tune || true
     fi
     return 0
@@ -477,6 +485,352 @@ stability_tune_menu() {
   done
 }
 
+ensure_yaml_deps() {
+  if python3 -c 'import yaml' >/dev/null 2>&1; then
+    return 0
+  fi
+  if has_cmd apk; then
+    pkg_install python3 py3-yaml || return 1
+  elif has_cmd dnf || has_cmd yum; then
+    pkg_install python3 python3-pyyaml || return 1
+  else
+    pkg_install python3 python3-yaml || return 1
+  fi
+  python3 -c 'import yaml' >/dev/null 2>&1 || {
+    err "需要 Python 3 与 PyYAML，请安装发行版的 YAML 包后重试"
+    return 1
+  }
+}
+
+config_yaml() {
+  python3 - "$@" <<'PY'
+import copy, os, re, sys
+import yaml
+class Loader(yaml.SafeLoader):
+    pass
+def mapping(loader, node, deep=False):
+    loader.flatten_mapping(node)
+    result = {}
+    for k, v in node.value:
+        key = loader.construct_object(k, deep=deep)
+        if key in result:
+            raise ValueError('duplicate YAML key')
+        result[key] = loader.construct_object(v, deep=deep)
+    return result
+Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+def load(path):
+    with open(path, encoding='utf-8') as f:
+        data = yaml.load(f, Loader=Loader)
+    if not isinstance(data, dict):
+        raise ValueError('configuration must be a mapping')
+    return data
+def text(value):
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        raise ValueError('expected scalar string or number')
+    value = str(value)
+    if any(ord(c) < 32 for c in value):
+        raise ValueError('control characters are not supported')
+    return value
+try:
+    mode, path = sys.argv[1:3]
+    data = load(path)
+    if mode == 'validate':
+        pass
+    elif mode == 'snapshot':
+        auth = data.get('auth', {})
+        if auth.get('type') != 'password' or not isinstance(auth.get('password'), str) or not auth['password']:
+            raise ValueError('interactive reconfiguration requires password authentication')
+        if data.get('obfs', {}).get('type', 'salamander') != 'salamander':
+            raise ValueError('unsupported obfuscation for client export; edit manually')
+        listen = text(data.get('listen', ':443'))
+        port = listen.rsplit(':', 1)[-1]
+        if not re.fullmatch(r'[0-9]+(?:-[0-9]+)?', port):
+            raise ValueError('unsupported listen format; edit manually')
+        bind = listen[:-len(port)]
+        client_path = sys.argv[3]
+        client = load(client_path) if os.path.isfile(client_path) else {}
+        server = text(client.get('server', ''))
+        if server.startswith(('hysteria2://', 'hy2://', 'realm://')):
+            raise ValueError('URI client configuration requires manual export')
+        host = server.rsplit(':', 1)[0].strip('[]') if ':' in server else server
+        bw = data.get('bandwidth') or {}
+        tls = data.get('tls', {})
+        acme = data.get('acme', {})
+        if not tls and not acme:
+            raise ValueError('TLS configuration missing; edit manually')
+        values = {
+            'CFG_LISTEN': port, 'CFG_BIND_PREFIX': bind or ':',
+            'CFG_AUTH_PASS': auth['password'],
+            'CFG_BW_UP': bw.get('up', ''), 'CFG_BW_DOWN': bw.get('down', ''),
+            'CFG_DISABLE_LOSS_COMP': int(bool(bw.get('disableLossCompensation', False))),
+            'CFG_SNIFF': int(bool((data.get('sniff') or {}).get('enable', False))),
+            'CFG_SPEEDTEST': int(bool(data.get('speedTest', False))),
+            'CFG_CERT_MODE': 'acme' if acme else 'self',
+            'CFG_SNI': client.get('tls', {}).get('sni', (acme.get('domains') or [''])[0]),
+            'CFG_INSECURE': int(bool(client.get('tls', {}).get('insecure', not bool(acme)))),
+            'CERT_FILE': tls.get('cert', ''), 'KEY_FILE': tls.get('key', ''),
+            'CFG_SERVER_ADDR': host,
+            'CFG_HOP_INTERVAL': client.get('transport', {}).get('udp', {}).get('hopInterval', '30s'),
+            'CFG_OBFS': int(bool(data.get('obfs'))),
+            'CFG_OBFS_PASS': data.get('obfs', {}).get('salamander', {}).get('password', ''),
+            'CFG_MASQ_TYPE': data.get('masquerade', {}).get('type', 'none'),
+            'CFG_MASQ_TCP': int(bool(data.get('masquerade', {}).get('listenHTTP') or data.get('masquerade', {}).get('listenHTTPS'))),
+        }
+        for key, value in values.items():
+            sys.stdout.buffer.write((key + '\0' + text(value) + '\0').encode())
+    elif mode == 'client':
+        old = load(sys.argv[3])
+        def merge(dst, src):
+            for key, value in src.items():
+                if isinstance(value, dict) and isinstance(dst.get(key), dict):
+                    merge(dst[key], value)
+                else:
+                    dst[key] = value
+        for key in ('up', 'down'):
+            if key not in data.get('bandwidth', {}):
+                (old.get('bandwidth') or {}).pop(key, None)
+        if 'obfs' not in data:
+            old.pop('obfs', None)
+        if 'pinSHA256' not in data.get('tls', {}):
+            (old.get('tls') or {}).pop('pinSHA256', None)
+        if 'transport' not in data:
+            for key in ('hopInterval', 'minHopInterval', 'maxHopInterval'):
+                ((old.get('transport') or {}).get('udp') or {}).pop(key, None)
+        else:
+            for key in ('minHopInterval', 'maxHopInterval'):
+                ((old.get('transport') or {}).get('udp') or {}).pop(key, None)
+        merge(old, data)
+        yaml.safe_dump(old, sys.stdout, allow_unicode=True, sort_keys=False)
+    elif mode == 'patch':
+        data = copy.deepcopy(data)
+        data['listen'] = os.environ['CFG_BIND_PREFIX'] + os.environ['CFG_LISTEN']
+        bw = data.get('bandwidth')
+        if bw is None:
+            bw = data['bandwidth'] = {}
+        for key, env in [('up', 'CFG_BW_UP'), ('down', 'CFG_BW_DOWN')]:
+            if os.environ[env]:
+                bw[key] = os.environ[env]
+            else:
+                bw.pop(key, None)
+        bw['disableLossCompensation'] = os.environ['CFG_DISABLE_LOSS_COMP'] == '1'
+        data['auth']['password'] = os.environ['CFG_AUTH_PASS']
+        sniff = data.get('sniff')
+        if sniff is None:
+            sniff = data['sniff'] = {}
+        sniff['enable'] = os.environ['CFG_SNIFF'] == '1'
+        data['speedTest'] = os.environ['CFG_SPEEDTEST'] == '1'
+        yaml.safe_dump(data, sys.stdout, allow_unicode=True, sort_keys=False)
+    else:
+        raise ValueError('unknown mode')
+except Exception:
+    print('配置解析失败：检查 YAML、重复键、认证/TLS 类型及客户端导出格式；原配置未被改写。', file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+valid_cert_pair() {
+  local cert_pub key_pub
+  [[ -r "$CERT_FILE" && -r "$KEY_FILE" ]] || return 1
+  openssl x509 -in "$CERT_FILE" -noout -checkend 0 >/dev/null 2>&1 || return 1
+  cert_pub="$(openssl x509 -in "$CERT_FILE" -pubkey -noout 2>/dev/null)" || return 1
+  key_pub="$(openssl pkey -in "$KEY_FILE" -passin pass: -pubout 2>/dev/null)" || return 1
+  [[ -n "$cert_pub" && "$cert_pub" == "$key_pub" ]]
+}
+
+format_host() {
+  local host="$1"
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    printf '[%s]' "$host"
+  else
+    printf '%s' "$host"
+  fi
+}
+
+validate_bandwidth() {
+  [[ -z "$1" || "$1" =~ ^[0-9]+([.][0-9]+)?[[:space:]]*(bps|b|kbps|kb|k|mbps|mb|m|gbps|gb|g|tbps|tb|t)$ ]]
+}
+
+normalize_hop_interval() {
+  local value="$1" number unit factor=1
+  [[ "$value" =~ ^([0-9]{1,8})(s|m|h)$ ]] || return 1
+  number=$((10#${BASH_REMATCH[1]}))
+  unit="${BASH_REMATCH[2]}"
+  case "$unit" in m) factor=60 ;; h) factor=3600 ;; esac
+  number=$((number * factor))
+  ((number >= 5 && number <= 2147483647)) || return 1
+  printf '%ss' "$number"
+}
+
+validate_connection_inputs() {
+  if ! validate_bandwidth "$CFG_BW_UP" || ! validate_bandwidth "$CFG_BW_DOWN"; then
+    err "带宽格式无效，例如 100 mbps；none 表示不设置该方向限制"
+    return 1
+  fi
+  if [[ "$CFG_IS_RANGE" == "1" ]]; then
+    CFG_HOP_INTERVAL="$(normalize_hop_interval "$CFG_HOP_INTERVAL")" || {
+      err "跳跃间隔须为整数 s/m/h，至少 5 秒，例如 30s"
+      return 1
+    }
+  fi
+  CFG_SERVER_ADDR="${CFG_SERVER_ADDR#[}"
+  CFG_SERVER_ADDR="${CFG_SERVER_ADDR%]}"
+  [[ -n "$CFG_SERVER_ADDR" && "$CFG_SERVER_ADDR" != *[[:space:]/@?#%]* ]] || {
+    err "连接地址须为域名或 IP，不含端口、URL 或 zone ID"
+    return 1
+  }
+  if [[ "$CFG_SERVER_ADDR" == *:* ]]; then
+    python3 -c 'import ipaddress,sys; ipaddress.IPv6Address(sys.argv[1])' "$CFG_SERVER_ADDR" >/dev/null 2>&1 || {
+      err "IPv6 地址无效（连接端口另行填写）"
+      return 1
+    }
+  fi
+}
+
+backup_configuration() {
+  CONFIG_BACKUP_DIR="$(mktemp -d "${CONFIG_DIR}/backup-$(date +%Y%m%d-%H%M%S).XXXXXX")" || return 1
+  chmod 700 "$CONFIG_BACKUP_DIR" || return 1
+  local file
+  for file in "$CONFIG_FILE" "$CERT_FILE" "$KEY_FILE"; do
+    if [[ -n "$file" && -f "$file" ]]; then
+      case "$file" in
+        "$CONFIG_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/config.yaml" || return 1 ;;
+        "$CERT_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/server.crt" || return 1 ;;
+        "$KEY_FILE") cp -p "$file" "$CONFIG_BACKUP_DIR/server.key" || return 1 ;;
+      esac
+    fi
+  done
+  info "配置与证书备份: $CONFIG_BACKUP_DIR"
+}
+
+commit_config() {
+  local candidate="$1"
+  if ! config_yaml validate "$candidate"; then
+    rm -f "$candidate"
+    return 1
+  fi
+  if [[ -f "$CONFIG_FILE" ]]; then
+    backup_configuration || { rm -f "$candidate"; return 1; }
+  fi
+  chmod 600 "$candidate" || return 1
+  fix_owner "$candidate"
+  mv -f "$candidate" "$CONFIG_FILE" || return 1
+}
+
+apply_config_service() {
+  if start_service; then
+    return 0
+  fi
+  if [[ -n "${CONFIG_BACKUP_DIR:-}" && -f "$CONFIG_BACKUP_DIR/config.yaml" ]]; then
+    local restore
+    restore="$(mktemp "${CONFIG_DIR}/.restore.XXXXXX")" || return 1
+    cp -p "$CONFIG_BACKUP_DIR/config.yaml" "$restore" || return 1
+    mv -f "$restore" "$CONFIG_FILE" || return 1
+    warn "新配置启动失败，已恢复旧配置；备份: $CONFIG_BACKUP_DIR"
+    if systemctl restart "$SERVICE_NAME" && systemctl is-active --quiet "$SERVICE_NAME"; then
+      info "旧配置服务已恢复"
+    else
+      err "旧配置服务也未能恢复，请检查 journalctl -u $SERVICE_NAME"
+    fi
+  fi
+  return 1
+}
+
+reconfigure_existing() {
+  ensure_yaml_deps || return 1
+  CONFIG_BACKUP_DIR=""
+  local snapshot name value candidate choice pass
+  snapshot="$(mktemp "${CONFIG_DIR}/.snapshot.XXXXXX")" || return 1
+  if ! config_yaml snapshot "$CONFIG_FILE" "${CONFIG_DIR}/client.yaml" >"$snapshot"; then
+    rm -f "$snapshot"
+    return 1
+  fi
+  while IFS= read -r -d '' name && IFS= read -r -d '' value; do
+    case "$name" in
+      CFG_*|CERT_FILE|KEY_FILE) printf -v "$name" '%s' "$value" ;;
+    esac
+  done <"$snapshot"
+  rm -f "$snapshot"
+  CFG_IS_RANGE=0
+  [[ "$CFG_LISTEN" == *-* ]] && CFG_IS_RANGE=1
+  info "复用现有证书、密码和高级配置；回车保留当前值"
+  CFG_LISTEN="$(prompt "监听端口或范围" "$CFG_LISTEN")"
+  local start end
+  if [[ "$CFG_LISTEN" =~ ^([0-9]{1,5})(-([0-9]{1,5}))?$ ]]; then
+    start=$((10#${BASH_REMATCH[1]}))
+    end=$start
+    [[ -z "${BASH_REMATCH[3]}" ]] || end=$((10#${BASH_REMATCH[3]}))
+    ((start >= 1 && end <= 65535 && start <= end)) || { err "端口范围无效"; return 1; }
+    CFG_IS_RANGE=0
+    if [[ "$CFG_LISTEN" == *-* ]]; then
+      CFG_IS_RANGE=1
+      ensure_firewall_for_porthop
+      CFG_HOP_INTERVAL="$(prompt "客户端跳端口间隔" "$CFG_HOP_INTERVAL")"
+      info "请在云厂商 Security List / NSG 和本机防火墙放行 UDP $CFG_LISTEN"
+    fi
+  else
+    err "端口须为 1-65535 或 起始-结束"
+    return 1
+  fi
+  CFG_BW_UP="$(prompt "服务端 up（每客户端；none 不设限制）" "$CFG_BW_UP")"
+  CFG_BW_DOWN="$(prompt "服务端 down（每客户端；none 不设限制）" "$CFG_BW_DOWN")"
+  [[ "$CFG_BW_UP" != "none" ]] || CFG_BW_UP=""
+  [[ "$CFG_BW_DOWN" != "none" ]] || CFG_BW_DOWN=""
+  choice=n; [[ "$CFG_DISABLE_LOSS_COMP" == "1" ]] && choice=y
+  CFG_DISABLE_LOSS_COMP=0
+  if prompt_yn "关闭服务端发送方向丢包补偿？" "$choice"; then CFG_DISABLE_LOSS_COMP=1; fi
+  choice=n; [[ "$CFG_SNIFF" == "1" ]] && choice=y
+  CFG_SNIFF=0
+  if prompt_yn "启用 sniff（域名识别/ACL）？" "$choice"; then CFG_SNIFF=1; fi
+  choice=n; [[ "$CFG_SPEEDTEST" == "1" ]] && choice=y
+  CFG_SPEEDTEST=0
+  if prompt_yn "启用内置测速？" "$choice"; then CFG_SPEEDTEST=1; fi
+  if prompt_yn "更换认证密码（现有客户端须更新）？" "n"; then
+    pass="$(prompt "新认证密码（回车随机）" "$(rand_password)")"
+    CFG_AUTH_PASS="$pass"
+  fi
+  CFG_SERVER_ADDR="$(prompt "客户端连接地址（IP 或域名）" "${CFG_SERVER_ADDR:-$(detect_public_ip)}")"
+  if [[ -z "$CFG_SNI" && -r "$CERT_FILE" ]]; then
+    CFG_SNI="$(openssl x509 -in "$CERT_FILE" -noout -subject -nameopt multiline 2>/dev/null | sed -n 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*//p')"
+  fi
+  CFG_SNI="$(prompt "客户端 SNI" "$CFG_SNI")"
+  if [[ "$CFG_CERT_MODE" == "self" ]]; then
+    if ! valid_cert_pair; then
+      err "现有 TLS 证书/密钥无效、不匹配或已过期，请先修复；不会自动轮换证书"
+      return 1
+    fi
+  fi
+  validate_connection_inputs || return 1
+  CFG_EXPORT_DIR="$(prompt "连接信息保存目录" "$(resolve_export_dir)")"
+  CFG_EXPORT_DIR="${CFG_EXPORT_DIR:-$(pwd -P)}"
+  [[ "$CFG_EXPORT_DIR" == /* ]] || CFG_EXPORT_DIR="$(pwd -P)/$CFG_EXPORT_DIR"
+  candidate="$(mktemp "${CONFIG_DIR}/.config.XXXXXX")" || return 1
+  if ! CFG_BIND_PREFIX="$CFG_BIND_PREFIX" CFG_LISTEN="$CFG_LISTEN" \
+    CFG_BW_UP="$CFG_BW_UP" CFG_BW_DOWN="$CFG_BW_DOWN" \
+    CFG_DISABLE_LOSS_COMP="$CFG_DISABLE_LOSS_COMP" CFG_AUTH_PASS="$CFG_AUTH_PASS" \
+    CFG_SNIFF="$CFG_SNIFF" CFG_SPEEDTEST="$CFG_SPEEDTEST" \
+    config_yaml patch "$CONFIG_FILE" >"$candidate"; then
+    rm -f "$candidate"
+    return 1
+  fi
+  commit_config "$candidate" || return 1
+  apply_config_service || return 1
+  maybe_apply_stability_tune
+  export_connection_info
+}
+
+run_official_installer() {
+  local installer status=0
+  installer="$(mktemp)" || return 1
+  if ! curl -fsSL "$OFFICIAL_INSTALL_URL" -o "$installer" || [[ ! -s "$installer" ]]; then
+    rm -f "$installer"
+    err "官方安装器下载失败，未执行安装/卸载"
+    return 1
+  fi
+  bash "$installer" "$@" || status=$?
+  rm -f "$installer"
+  return "$status"
+}
+
 install_binary() {
   title "安装 / 升级"
   if [[ -x "$HY2_BIN" ]]; then
@@ -490,7 +844,7 @@ install_binary() {
       return 0
     fi
   fi
-  bash <(curl -fsSL "$OFFICIAL_INSTALL_URL")
+  run_official_installer || return 1
   if [[ ! -x "$HY2_BIN" ]]; then
     err "安装失败：找不到 $HY2_BIN"
     exit 1
@@ -499,19 +853,29 @@ install_binary() {
 }
 
 gen_self_signed_cert() {
-  local cn="$1"
+  local cn="$1" cert_stage key_stage
   mkdir -p "$CONFIG_DIR"
-  openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-    -keyout "$KEY_FILE" -out "$CERT_FILE" \
-    -subj "/CN=${cn}" -days 3650 >/dev/null 2>&1
-  fix_owner "$CERT_FILE" "$KEY_FILE"
-  chmod 600 "$KEY_FILE"
-  chmod 644 "$CERT_FILE"
+  cert_stage="$(mktemp "${CONFIG_DIR}/.cert.XXXXXX")" || return 1
+  key_stage="$(mktemp "${CONFIG_DIR}/.key.XXXXXX")" || { rm -f "$cert_stage"; return 1; }
+  if ! openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+    -keyout "$key_stage" -out "$cert_stage" \
+    -subj "/CN=${cn}" -days 3650 >/dev/null 2>&1; then
+    rm -f "$cert_stage" "$key_stage"
+    err "证书生成失败"
+    return 1
+  fi
+  chmod 600 "$key_stage"
+  chmod 644 "$cert_stage"
+  fix_owner "$cert_stage" "$key_stage"
+  mv -f "$key_stage" "$KEY_FILE"
+  mv -f "$cert_stage" "$CERT_FILE"
   info "已生成自签证书 CN=${cn}"
 }
 
 write_server_config() {
   mkdir -p "$CONFIG_DIR"
+  local candidate
+  candidate="$(mktemp "${CONFIG_DIR}/.config.XXXXXX")" || return 1
   {
     echo "listen: :${CFG_LISTEN}"
     echo
@@ -538,9 +902,9 @@ auth:
   password: $(yaml_quote "$CFG_AUTH_PASS")
 
 bandwidth:
-  up: $(yaml_quote "$CFG_BW_UP")
-  down: $(yaml_quote "$CFG_BW_DOWN")
 EOF
+    [[ -z "$CFG_BW_UP" ]] || echo "  up: $(yaml_quote "$CFG_BW_UP")"
+    [[ -z "$CFG_BW_DOWN" ]] || echo "  down: $(yaml_quote "$CFG_BW_DOWN")"
     if [[ "$CFG_DISABLE_LOSS_COMP" == "1" ]]; then
       echo "  disableLossCompensation: true"
     fi
@@ -606,17 +970,16 @@ EOF
 EOF
       fi
     fi
-  } >"$CONFIG_FILE"
+  } >"$candidate"
 
-  fix_owner "$CONFIG_FILE"
-  chmod 600 "$CONFIG_FILE"
+  commit_config "$candidate" || return 1
   info "已写入服务端配置: $CONFIG_FILE"
 }
 
 build_share_uri() {
   local auth_enc hostport query pin
   auth_enc="$(urlencode "$CFG_AUTH_PASS")"
-  hostport="${CFG_SERVER_ADDR}:${CFG_LISTEN}"
+  hostport="$(format_host "$CFG_SERVER_ADDR"):${CFG_LISTEN}"
   query="sni=$(urlencode "$CFG_SNI")"
   if [[ "$CFG_INSECURE" == "1" ]]; then
     query+="&insecure=1"
@@ -642,19 +1005,24 @@ build_client_yaml() {
   pin="$(cert_sha256_pin || true)"
   cat <<EOF
 
-server: $(yaml_quote "${CFG_SERVER_ADDR}:${CFG_LISTEN}")
+server: $(yaml_quote "$(format_host "$CFG_SERVER_ADDR"):${CFG_LISTEN}")
 
 auth: $(yaml_quote "$CFG_AUTH_PASS")
 
 bandwidth:
-  up: $(yaml_quote "$client_up")
-  down: $(yaml_quote "$client_down")
+EOF
+  [[ -z "$client_up" ]] || echo "  up: $(yaml_quote "$client_up")"
+  [[ -z "$client_down" ]] || echo "  down: $(yaml_quote "$client_down")"
+  if [[ -z "$client_up" && -z "$client_down" ]]; then echo "  {}"; fi
+  cat <<EOF
 
 tls:
   sni: $(yaml_quote "$CFG_SNI")
 EOF
   if [[ "$CFG_INSECURE" == "1" ]]; then
     echo "  insecure: true"
+  else
+    echo "  insecure: false"
   fi
   if [[ -n "$pin" ]]; then
     echo "  pinSHA256: ${pin}"
@@ -682,9 +1050,22 @@ build_surge_line() {
   local pin port_part bw_num
   pin="$(cert_sha256_pin || true)"
   port_part="${CFG_LISTEN%%-*}"
-  bw_num="${CFG_BW_UP%% *}"
-  printf 'Proxy = hysteria2, %s, %s, password=%s, download-bandwidth=%s, sni=%s' \
-    "$CFG_SERVER_ADDR" "$port_part" "$CFG_AUTH_PASS" "$bw_num" "$CFG_SNI"
+  bw_num="$(python3 - "$CFG_BW_UP" <<'PYBW'
+import re, sys
+from decimal import Decimal
+m = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)\s*(bps|b|kbps|kb|k|mbps|mb|m|gbps|gb|g|tbps|tb|t)', sys.argv[1])
+if m:
+    scale = {'b': 0, 'k': 3, 'm': 6, 'g': 9, 't': 12}[m[2][0]]
+    value = Decimal(m[1]) * Decimal(10) ** (scale - 6)
+    if value:
+        print(format(value, 'f'))
+PYBW
+)"
+  printf 'Proxy = hysteria2, %s, %s, password=%s, sni=%s' \
+    "$CFG_SERVER_ADDR" "$port_part" "$CFG_AUTH_PASS" "$CFG_SNI"
+  if [[ -n "$bw_num" && "$bw_num" != "0" ]]; then
+    printf ', download-bandwidth=%s' "$bw_num"
+  fi
   if [[ "$CFG_IS_RANGE" == "1" ]]; then
     printf ', port-hopping=%s, port-hopping-interval=%s' \
       "$CFG_LISTEN" "$(echo "$CFG_HOP_INTERVAL" | tr -cd '0-9')"
@@ -734,10 +1115,10 @@ EOF
   cat <<EOF
  伪装模式 : ${CFG_MASQ_TYPE}$([[ "$CFG_MASQ_TCP" == "1" ]] && echo " + TCP:80/443")
  混淆     : $([[ "$CFG_OBFS" == "1" ]] && echo "开启 / ${CFG_OBFS_PASS}" || echo "关闭")
- 带宽限制 : 服务端 up=${CFG_BW_UP}  down=${CFG_BW_DOWN}
+ 每客户端限制 : 服务端 up=${CFG_BW_UP}  down=${CFG_BW_DOWN}
             客户端 up=${CFG_BW_DOWN} down=${CFG_BW_UP}
  协议嗅探 : $([[ "$CFG_SNIFF" == "1" ]] && echo "开启" || echo "关闭")
- 丢包补偿 : $([[ "$CFG_DISABLE_LOSS_COMP" == "1" ]] && echo "已关闭" || echo "开启")
+ 服务端发送丢包补偿 : $([[ "$CFG_DISABLE_LOSS_COMP" == "1" ]] && echo "已关闭" || echo "开启")
  速度测试 : $([[ "$CFG_SPEEDTEST" == "1" ]] && echo "开启" || echo "关闭")
 ----------------------------------------
  分享 URI:
@@ -752,32 +1133,50 @@ EOF
 EOF
 }
 
-export_connection_info() {
-  local dir="$CFG_EXPORT_DIR"
-  mkdir -p "$dir"
-  local summary_file="${dir}/connection.txt"
-  local client_file="${dir}/client.yaml"
-  local uri_file="${dir}/share-uri.txt"
-  local surge_file="${dir}/surge-proxy.txt"
-  local uri
-  uri="$(build_share_uri)"
+export_connection_info() (
+  umask 077
+  local dir="$CFG_EXPORT_DIR" stage="" copy_stage="" meta_candidate="" file
+  mkdir -p "$dir" "$CONFIG_DIR" || return 1
+  stage="$(mktemp -d "${dir}/.hy2-export.XXXXXX")" || return 1
+  trap 'rm -rf -- "$stage"; if [[ -n "$copy_stage" ]]; then rm -rf -- "$copy_stage"; fi; if [[ -n "$meta_candidate" ]]; then rm -f -- "$meta_candidate"; fi' EXIT
 
-  build_summary | tee "$summary_file"
-  build_client_yaml >"$client_file"
-  printf '%s\n' "$uri" >"$uri_file"
-  build_surge_line >"$surge_file"
+  build_summary >"$stage/connection.txt" || return 1
+  build_client_yaml >"$stage/client.yaml" || return 1
+  if [[ -f "${CONFIG_DIR}/client.yaml" ]]; then
+    config_yaml client "$stage/client.yaml" "${CONFIG_DIR}/client.yaml" >"$stage/client-merged.yaml" || return 1
+    mv -f "$stage/client-merged.yaml" "$stage/client.yaml" || return 1
+  fi
+  config_yaml validate "$stage/client.yaml" || return 1
+  build_share_uri >"$stage/share-uri.txt" || return 1
+  printf '\n' >>"$stage/share-uri.txt" || return 1
+  build_surge_line >"$stage/surge-proxy.txt" || return 1
 
-  mkdir -p "$CONFIG_DIR"
-  cp -f "$summary_file" "${CONFIG_DIR}/connection.txt"
-  cp -f "$client_file" "${CONFIG_DIR}/client.yaml"
-  cp -f "$uri_file" "${CONFIG_DIR}/share-uri.txt"
-  cp -f "$surge_file" "${CONFIG_DIR}/surge-proxy.txt"
-  printf '%s\n' "$dir" >"$EXPORT_META"
+  if [[ ! "$dir" -ef "$CONFIG_DIR" ]]; then
+    copy_stage="$(mktemp -d "${CONFIG_DIR}/.hy2-export.XXXXXX")" || return 1
+    for file in connection.txt client.yaml share-uri.txt surge-proxy.txt; do
+      cp "$stage/$file" "$copy_stage/$file" || return 1
+    done
+  fi
+  meta_candidate="$(mktemp "${EXPORT_META}.XXXXXX")" || return 1
+  printf '%s\n' "$dir" >"$meta_candidate" || return 1
+  [[ ! -d "$EXPORT_META" ]] || { err "导出目录记录路径是目录: $EXPORT_META"; return 1; }
 
-  chmod 600 "$summary_file" "$client_file" "$uri_file" "$surge_file" \
-    "${CONFIG_DIR}/connection.txt" "${CONFIG_DIR}/client.yaml" \
-    "${CONFIG_DIR}/share-uri.txt" "${CONFIG_DIR}/surge-proxy.txt" \
-    "$EXPORT_META" 2>/dev/null || true
+  for file in connection.txt client.yaml share-uri.txt surge-proxy.txt; do
+    [[ ! -d "$dir/$file" && ! -d "$CONFIG_DIR/$file" ]] || {
+      err "导出目标是目录: $file"
+      return 1
+    }
+    chmod 600 "$stage/$file" || return 1
+    if [[ -n "$copy_stage" ]]; then chmod 600 "$copy_stage/$file" || return 1; fi
+  done
+  for file in connection.txt client.yaml share-uri.txt surge-proxy.txt; do
+    mv -f -- "$stage/$file" "$dir/$file" || return 1
+    if [[ -n "$copy_stage" ]]; then
+      mv -f -- "$copy_stage/$file" "$CONFIG_DIR/$file" || return 1
+    fi
+  done
+  mv -f -- "$meta_candidate" "$EXPORT_META" || return 1
+  cat "$dir/connection.txt" || return 1
 
   echo
   info "连接信息已保存到: ${dir}/"
@@ -786,25 +1185,28 @@ export_connection_info() {
   info "  - share-uri.txt    分享链接"
   info "  - surge-proxy.txt  Surge [Proxy] 策略行"
   info "副本: ${CONFIG_DIR}/connection.txt"
-}
+)
 
 start_service() {
-  systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME"
+  systemctl daemon-reload || return 1
+  systemctl enable "$SERVICE_NAME" || return 1
+  local restarted=0
+  systemctl restart "$SERVICE_NAME" && restarted=1
   sleep 1
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    info "服务已启动（并已设置开机自启）: $SERVICE_NAME"
+  if [[ "$restarted" == "1" ]] && systemctl is-active --quiet "$SERVICE_NAME"; then
+    info "配置已加载，服务已重启（并已设置开机自启）: $SERVICE_NAME"
   else
     warn "服务未正常启动"
     diagnose_service_failure
     echo "  完整日志: journalctl -u $SERVICE_NAME -n 50 --no-pager"
     systemctl --no-pager --full status "$SERVICE_NAME" || true
+    return 1
   fi
 }
 
 require_service_unit() {
   if ! systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-    err "未找到 systemd 服务 $SERVICE_NAME（请先安装）"
+    err "未找到 systemd 服务 ${SERVICE_NAME}（请先安装）"
     return 1
   fi
   return 0
@@ -890,6 +1292,14 @@ disable_service() {
 }
 
 interactive_configure() {
+  ensure_yaml_deps || return 1
+  if [[ -f "$CONFIG_FILE" ]]; then
+    reconfigure_existing
+    return $?
+  fi
+  CONFIG_BACKUP_DIR=""
+  CERT_FILE="${CONFIG_DIR}/server.crt"
+  KEY_FILE="${CONFIG_DIR}/server.key"
   title "交互式配置"
 
   echo
@@ -903,12 +1313,12 @@ interactive_configure() {
     local hop_range hop_start hop_end
     hop_range="$(prompt "端口跳跃范围" "$DEFAULT_HOP_RANGE")"
     hop_range="${hop_range// /}"
-    if [[ ! "$hop_range" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    if [[ ! "$hop_range" =~ ^([0-9]{1,5})-([0-9]{1,5})$ ]]; then
       err "范围格式须为 起始-结束，例如 20000-50000"
       exit 1
     fi
-    hop_start="${BASH_REMATCH[1]}"
-    hop_end="${BASH_REMATCH[2]}"
+    hop_start=$((10#${BASH_REMATCH[1]}))
+    hop_end=$((10#${BASH_REMATCH[2]}))
     if ((hop_start < 1 || hop_end > 65535 || hop_start > hop_end)); then
       err "范围无效：须满足 1 ≤ 起始 ≤ 结束 ≤ 65535"
       exit 1
@@ -918,13 +1328,15 @@ interactive_configure() {
     CFG_IS_RANGE=1
     CFG_HOP_INTERVAL="$(prompt "客户端跳端口间隔" "$DEFAULT_HOP_INTERVAL")"
     info "已启用端口跳跃: ${CFG_LISTEN}（间隔 ${CFG_HOP_INTERVAL}）"
+    info "请在云厂商 Security List / NSG 和本机防火墙放行 UDP $CFG_LISTEN"
   else
     CFG_LISTEN="$(prompt "监听端口" "$DEFAULT_LISTEN_PORT")"
     CFG_LISTEN="${CFG_LISTEN// /}"
-    if [[ ! "$CFG_LISTEN" =~ ^[0-9]+$ ]] || ((CFG_LISTEN < 1 || CFG_LISTEN > 65535)); then
+    if [[ ! "$CFG_LISTEN" =~ ^[0-9]{1,5}$ ]] || ((10#$CFG_LISTEN < 1 || 10#$CFG_LISTEN > 65535)); then
       err "端口须为 1-65535 的数字"
       exit 1
     fi
+    CFG_LISTEN=$((10#$CFG_LISTEN))
     info "使用单端口: ${CFG_LISTEN}"
   fi
 
@@ -947,7 +1359,6 @@ interactive_configure() {
       CFG_DOMAIN="$(prompt "证书 CN / 客户端 SNI（可用伪装站域名）" "www.bing.com")"
       CFG_SNI="$CFG_DOMAIN"
       CFG_INSECURE=1
-      gen_self_signed_cert "$CFG_DOMAIN"
       ;;
   esac
 
@@ -1001,15 +1412,15 @@ interactive_configure() {
   CFG_BW_DOWN="$(prompt "服务器 down（≈客户端上传）" "$DEFAULT_BW_DOWN")"
   CFG_DISABLE_LOSS_COMP=1
   echo
-  if prompt_yn "关闭丢包补偿？" "y"; then
+  if prompt_yn "关闭服务端发送方向丢包补偿？" "y"; then
     CFG_DISABLE_LOSS_COMP=1
   else
     CFG_DISABLE_LOSS_COMP=0
   fi
 
   echo
-  CFG_SNIFF=1
-  if prompt_yn "启用协议嗅探 sniff？(TUN/ACL 推荐)" "y"; then
+  CFG_SNIFF=0
+  if prompt_yn "启用协议嗅探 sniff？（域名识别/ACL，默认关闭）" "n"; then
     CFG_SNIFF=1
   else
     CFG_SNIFF=0
@@ -1041,8 +1452,21 @@ interactive_configure() {
     CFG_EXPORT_DIR="${cwd_export}/${CFG_EXPORT_DIR}"
   fi
 
-  write_server_config
-  start_service
+  validate_connection_inputs || return 1
+  if [[ "$CFG_CERT_MODE" == "self" ]]; then
+    if [[ -f "$CERT_FILE" || -f "$KEY_FILE" ]]; then
+      if valid_cert_pair; then
+        info "复用现有证书与密钥"
+      else
+        err "已有证书/密钥不完整或无效，请先修复"
+        return 1
+      fi
+    else
+      gen_self_signed_cert "$CFG_DOMAIN" || return 1
+    fi
+  fi
+  write_server_config || return 1
+  apply_config_service || return 1
 
   maybe_apply_stability_tune
 
@@ -1143,25 +1567,28 @@ uninstall_all() {
     return
   fi
   local keep_cfg=0
-  if prompt_yn "是否保留配置与证书目录 $CONFIG_DIR？" "y"; then
+  if prompt_yn "是否保留配置与证书目录 ${CONFIG_DIR}？" "y"; then
     keep_cfg=1
   fi
   local dir
   dir="$(resolve_export_dir)"
   local keep_export=1
   if [[ -n "$dir" && -d "$dir" ]]; then
-    if ! prompt_yn "是否保留连接信息目录 $dir？" "y"; then
+    if ! prompt_yn "是否保留 ${dir} 中的连接信息文件？" "y"; then
       keep_export=0
     fi
+  fi
+  if ! run_official_installer --remove; then
+    err "官方卸载失败，保留配置与连接信息；请排查后重试"
+    return 1
   fi
   if [[ -f "$SYSCTL_DROPIN" ]] || [[ -f "$SYSCTL_BACKUP" ]]; then
     if prompt_yn "是否同时撤销 UDP 缓冲区稳定性调优？" "y"; then
       revert_udp_buffer_tune || true
     else
-      info "已保留 sysctl 调优（$SYSCTL_DROPIN）"
+      info "已保留 sysctl 调优（${SYSCTL_DROPIN}）"
     fi
   fi
-  bash <(curl -fsSL "$OFFICIAL_INSTALL_URL") --remove || true
   if [[ "$keep_cfg" -eq 0 ]]; then
     rm -rf "$CONFIG_DIR"
     info "已删除 $CONFIG_DIR"
@@ -1169,8 +1596,8 @@ uninstall_all() {
     info "已保留 $CONFIG_DIR"
   fi
   if [[ "$keep_export" -eq 0 && -n "$dir" ]]; then
-    rm -rf "$dir"
-    info "已删除 $dir"
+    rm -f -- "$dir/connection.txt" "$dir/client.yaml" "$dir/share-uri.txt" "$dir/surge-proxy.txt"
+    info "已删除 $dir 中的连接信息文件（保留目录和其它文件）"
   fi
 }
 
@@ -1213,7 +1640,7 @@ main_menu() {
       2)
         ensure_deps
         if [[ ! -x "$HY2_BIN" ]]; then
-          err "未检测到 $HY2_BIN，请先选 1 安装"
+          err "未检测到 ${HY2_BIN}，请先选 1 安装"
           continue
         fi
         interactive_configure
